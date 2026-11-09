@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+**/renders/
+.vs/
+.idea/
+*.user
+*.suo
+dist/
+data/
+logs/
+diagnostics/
+*.pdb
+*.zip
+.env
+.env.*
