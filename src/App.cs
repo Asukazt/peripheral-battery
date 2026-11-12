@@ -108,7 +108,7 @@ internal sealed class Controller
         TrayMenu.Items.Add("退出 " + Program.AppName, null, (_, _) => Exit());
         tray = new Forms.NotifyIcon
         {
-            Icon = new System.Drawing.Icon(Path.Combine(root, "assets", "peridock.ico")),
+            Icon = new System.Drawing.Icon(Path.Combine(root, "assets", "peridock-tray.ico")),
             Text = Program.AppName + " · 正在读取电量", Visible = true, ContextMenuStrip = TrayMenu
         };
         tray.MouseClick += (_, e) => { if (e.Button == Forms.MouseButtons.Left) ScheduleClick(true); };
@@ -129,7 +129,7 @@ internal sealed class Controller
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         if (settings.ShowDock) host.Show();
         refreshTimer.Start(); uiTimer.Start();
-        log.Write("info", "app", "start", Program.AppName + " 0.1.0 started");
+        log.Write("info", "app", "start", Program.AppName + " 0.1.1 started");
         if (showDetails) ShowDetails();
         else if (showPopover) popover.OpenAt(Anchor(), true);
         _ = Refresh();

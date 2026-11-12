@@ -1,6 +1,6 @@
 # Third-party notices
 
-Peripheral Battery 0.1.0 is an unofficial Windows peripheral battery utility.
+Peripheral Battery 0.1.1 is an unofficial Windows peripheral battery utility.
 Original application code is MIT-licensed; upstream notices remain applicable.
 
 ## Protocol implementations
@@ -35,7 +35,8 @@ Original application code is MIT-licensed; upstream notices remain applicable.
 
 UI SVG icons are from lucide-icons/lucide 0.468.0.
 Product illustrations are rasterizations of keyboard.svg, mouse.svg and
-headphones.svg; application PNG/ICO artwork rasterizes battery-full.svg.
+headphones.svg. Application and tray PNG/ICO battery artwork is original
+project artwork, distributed under the project's MIT license.
 ISC notice: docs/licenses/LICENSE-lucide.txt.
 Feather-derived icons retain the MIT notice in docs/licenses/LICENSE-feather.txt.
 https://github.com/lucide-icons/lucide/tree/0.468.0
