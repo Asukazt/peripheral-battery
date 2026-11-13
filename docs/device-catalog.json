@@ -1,0 +1,1302 @@
+[
+  {
+    "vid": "1532",
+    "pid": "0024",
+    "Name": "Razer Mamba (2012)",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0025",
+    "Name": "Razer Mamba (2012)",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "003e",
+    "Name": "Razer Naga Epic Chroma",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "003f",
+    "Name": "Razer Naga Epic Chroma",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0044",
+    "Name": "Razer Mamba",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0045",
+    "Name": "Razer Mamba",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0059",
+    "Name": "Razer Lancehead",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "005a",
+    "Name": "Razer Lancehead",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0070",
+    "Name": "Razer Lancehead Wireless",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "006f",
+    "Name": "Razer Lancehead Wireless",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0073",
+    "Name": "Razer Mamba Wireless",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0072",
+    "Name": "Razer Mamba Wireless",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0080",
+    "Name": "Razer Pro Click",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0077",
+    "Name": "Razer Pro Click",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "007a",
+    "Name": "Razer Viper Ultimate",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "007b",
+    "Name": "Razer Viper Ultimate",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "007c",
+    "Name": "Razer DeathAdder V2 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "007d",
+    "Name": "Razer DeathAdder V2 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0086",
+    "Name": "Razer Basilisk Ultimate",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0088",
+    "Name": "Razer Basilisk Ultimate",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "008f",
+    "Name": "Razer Naga Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0090",
+    "Name": "Razer Naga Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "009e",
+    "Name": "Razer Viper Mini SE",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "009f",
+    "Name": "Razer Viper Mini SE",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00a5",
+    "Name": "Razer Viper V2 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00a6",
+    "Name": "Razer Viper V2 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00a7",
+    "Name": "Razer Naga V2 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00a8",
+    "Name": "Razer Naga V2 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00aa",
+    "Name": "Razer Basilisk V3 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00ab",
+    "Name": "Razer Basilisk V3 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00af",
+    "Name": "Razer Cobra Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00b0",
+    "Name": "Razer Cobra Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00b6",
+    "Name": "Razer DeathAdder V3 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00b7",
+    "Name": "Razer DeathAdder V3 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00be",
+    "Name": "Razer DeathAdder V4 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00bf",
+    "Name": "Razer DeathAdder V4 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00c0",
+    "Name": "Razer Viper V3 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00c1",
+    "Name": "Razer Viper V3 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00c2",
+    "Name": "Razer DeathAdder V3 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00c3",
+    "Name": "Razer DeathAdder V3 Pro",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00c4",
+    "Name": "Razer DeathAdder V3 HyperSpeed",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00c5",
+    "Name": "Razer DeathAdder V3 HyperSpeed",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00c7",
+    "Name": "Razer Pro Click V2 Vertical Edition",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00c8",
+    "Name": "Razer Pro Click V2 Vertical Edition",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00cc",
+    "Name": "Razer Basilisk V3 Pro 35K",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00cd",
+    "Name": "Razer Basilisk V3 Pro 35K",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00d0",
+    "Name": "Razer Pro Click V2",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00d1",
+    "Name": "Razer Pro Click V2",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00d3",
+    "Name": "Razer Basilisk Mobile",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00d4",
+    "Name": "Razer Basilisk Mobile",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00d6",
+    "Name": "Razer Basilisk V3 Pro 35K Phantom Green",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00d7",
+    "Name": "Razer Basilisk V3 Pro 35K Phantom Green",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "001f",
+    "Name": "Razer Naga Epic",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0032",
+    "Name": "Razer Ouroboros",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0062",
+    "Name": "Razer Atheris",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0083",
+    "Name": "Razer Basilisk X HyperSpeed",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0094",
+    "Name": "Razer Orochi V2",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "009a",
+    "Name": "Razer Pro Click Mini",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "009c",
+    "Name": "Razer DeathAdder V2 X HyperSpeed",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00b3",
+    "Name": "Razer HyperPolling Dongle",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00b4",
+    "Name": "Razer Naga V2 HyperSpeed",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00b8",
+    "Name": "Razer Viper V3 HyperSpeed",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "00b9",
+    "Name": "Razer Basilisk V3 X HyperSpeed",
+    "Kind": "mouse",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0292",
+    "Name": "Razer DeathStalker V2 Pro",
+    "Kind": "keyboard",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0290",
+    "Name": "Razer DeathStalker V2 Pro",
+    "Kind": "keyboard",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0298",
+    "Name": "Razer DeathStalker V2 Pro TKL",
+    "Kind": "keyboard",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0296",
+    "Name": "Razer DeathStalker V2 Pro TKL",
+    "Kind": "keyboard",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0258",
+    "Name": "Razer BlackWidow V3 Mini HyperSpeed",
+    "Kind": "keyboard",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0271",
+    "Name": "Razer BlackWidow V3 Mini HyperSpeed",
+    "Kind": "keyboard",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "02b9",
+    "Name": "Razer BlackWidow V4 Mini HyperSpeed",
+    "Kind": "keyboard",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "02ba",
+    "Name": "Razer BlackWidow V4 Mini HyperSpeed",
+    "Kind": "keyboard",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "02d7",
+    "Name": "Razer BlackWidow V4 Tenkeyless HyperSpeed",
+    "Kind": "keyboard",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "02d5",
+    "Name": "Razer BlackWidow V4 Tenkeyless HyperSpeed",
+    "Kind": "keyboard",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "025a",
+    "Name": "Razer BlackWidow V3 Pro",
+    "Kind": "keyboard",
+    "Reader": "RazerFeature",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "025c",
+    "Name": "Razer BlackWidow V3 Pro",
+    "Kind": "keyboard",
+    "Reader": "RazerFeature",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0576",
+    "Name": "Razer BlackShark V3 Pro",
+    "Kind": "headset",
+    "Reader": "Scythe",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0577",
+    "Name": "Razer BlackShark V3 Pro",
+    "Kind": "headset",
+    "Reader": "Scythe",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0528",
+    "Name": "Razer BlackShark V2 Pro (2020)",
+    "Kind": "headset",
+    "Reader": "Razer2020",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0555",
+    "Name": "Razer BlackShark V2 Pro (2023)",
+    "Kind": "headset",
+    "Reader": "RazerPA",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0556",
+    "Name": "Razer BlackShark V2 Pro (2023)",
+    "Kind": "headset",
+    "Reader": "RazerPA",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "0557",
+    "Name": "Razer BlackShark V2 Pro (2023)",
+    "Kind": "headset",
+    "Reader": "Unsupported",
+    "Connection": "2.4G",
+    "protocolAvailable": false,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "1532",
+    "pid": "053a",
+    "Name": "Razer Barracuda Pro",
+    "Kind": "headset",
+    "Reader": "RazerPA",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a70",
+    "Name": "ROG Gladius III Aimpoint",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a72",
+    "Name": "ROG Gladius III Aimpoint",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1b0a",
+    "Name": "ROG Gladius III Eva 2",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1b0c",
+    "Name": "ROG Gladius III Eva 2",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "197d",
+    "Name": "ROG Gladius III Wireless",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "197f",
+    "Name": "ROG Gladius III Wireless",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a18",
+    "Name": "ROG Chakram X",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a1a",
+    "Name": "ROG Chakram X",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a92",
+    "Name": "ROG Harpe Ace Aim Lab Edition",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a94",
+    "Name": "ROG Harpe Ace Aim Lab Edition",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a66",
+    "Name": "ROG Keris Wireless Aimpoint",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a68",
+    "Name": "ROG Keris Wireless Aimpoint",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1977",
+    "Name": "ROG Spatha X",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1979",
+    "Name": "ROG Spatha X",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1af3",
+    "Name": "TX Gaming Mouse Mini",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1af5",
+    "Name": "TX Gaming Mouse Mini",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1c56",
+    "Name": "TUF Gaming Mini Miku Edition",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1c57",
+    "Name": "TUF Gaming Mini Miku Edition",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "18e3",
+    "Name": "ROG Chakram",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "18e5",
+    "Name": "ROG Chakram",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "195e",
+    "Name": "ROG Keris Wireless",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1960",
+    "Name": "ROG Keris Wireless",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a57",
+    "Name": "ROG Keris EVA Edition",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a59",
+    "Name": "ROG Keris EVA Edition",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1906",
+    "Name": "ROG Pugio II",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1908",
+    "Name": "ROG Pugio II",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1947",
+    "Name": "ROG Strix Impact II Wireless",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "USB",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1949",
+    "Name": "ROG Strix Impact II Wireless",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "19f4",
+    "Name": "TUF Gaming M4 Wireless",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a8d",
+    "Name": "TX Gaming Mouse",
+    "Kind": "mouse",
+    "Reader": "AsusMouse",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a83",
+    "Name": "ROG Azoth",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a85",
+    "Name": "ROG Azoth",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1b3f",
+    "Name": "ROG Azoth Extreme",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1cef",
+    "Name": "ROG Azoth Extreme SE",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1c24",
+    "Name": "ROG Azoth X",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1c25",
+    "Name": "ROG Azoth X",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "193c",
+    "Name": "ROG Falchion",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "193e",
+    "Name": "ROG Falchion",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1b04",
+    "Name": "ROG Falchion RX",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "196b",
+    "Name": "ROG Claymore II",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1aae",
+    "Name": "ROG Strix Scope II 96",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1b78",
+    "Name": "ROG Strix Scope II 96 RX",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1a07",
+    "Name": "ROG Strix Scope RX TKL",
+    "Kind": "keyboard",
+    "Reader": "AsusKeyboard",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1afa",
+    "Name": "ROG Delta II",
+    "Kind": "headset",
+    "Reader": "AsusHeadset",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1d41",
+    "Name": "ROG Delta II KJP",
+    "Kind": "headset",
+    "Reader": "AsusHeadset",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1b84",
+    "Name": "ROG Pelta",
+    "Kind": "headset",
+    "Reader": "AsusHeadset",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1ad3",
+    "Name": "ROG Cetra SpeedNova",
+    "Kind": "headset",
+    "Reader": "AsusHeadset",
+    "Connection": "2.4G",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  },
+  {
+    "vid": "0b05",
+    "pid": "1ace",
+    "Name": "ROG OMNI Receiver",
+    "Kind": "keyboard",
+    "Reader": "Omni",
+    "Connection": "\u5F85\u786E\u8BA4",
+    "protocolAvailable": true,
+    "hardwareVerified": false
+  }
+]

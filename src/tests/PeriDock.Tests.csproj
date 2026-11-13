@@ -10,5 +10,7 @@
     <Compile Include="..\BatteryState.cs" Link="BatteryState.cs"/>
     <Compile Include="..\Diagnostics.cs" Link="Diagnostics.cs"/>
     <Compile Include="..\UserSettings.cs" Link="UserSettings.cs"/>
+    <Compile Include="..\DeviceCatalog.cs" Link="DeviceCatalog.cs"/>
+    <Compile Include="..\NativeDevices.cs" Link="NativeDevices.cs"/>
   </ItemGroup>
 </Project>

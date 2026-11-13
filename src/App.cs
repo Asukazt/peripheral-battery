@@ -10,18 +10,32 @@ namespace PeriDock;
 
 internal static class Program
 {
-    internal const string AppName = "Peripheral Battery";
+    internal const string AppName = "Peripheral Battery Preview";
     [STAThread]
     static int Main(string[] args)
     {
         var root = AppContext.BaseDirectory;
         var log = new Diagnostics(root);
+        if (args.Length == 1 && args[0] is "--discover" or "--target-probe")
+        {
+            try
+            {
+                if (args[0] == "--discover") Console.WriteLine(JsonSerializer.Serialize(DeviceReader.Discover().GetAwaiter().GetResult()));
+                else
+                {
+                    var target = JsonSerializer.Deserialize<DeviceTarget>(Console.In.ReadToEnd()) ?? throw new ArgumentException("Missing device");
+                    Console.WriteLine(JsonSerializer.Serialize(DeviceReader.ProbeTarget(target).GetAwaiter().GetResult()));
+                }
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine(Diagnostics.Redact(ex.GetType().Name + ": " + ex.Message)); return 1; }
+        }
         if (args.Length == 2 && args[0] == "--probe")
         {
             try { Console.WriteLine(JsonSerializer.Serialize(DeviceReader.Probe(args[1]).GetAwaiter().GetResult())); return 0; }
             catch (Exception ex) { Console.Error.WriteLine(Diagnostics.Redact(ex.GetType().Name + ": " + ex.Message)); return 1; }
         }
-        using var instance = new Mutex(true, @"Local\PeriDock-Widget", out var created);
+        using var instance = new Mutex(true, @"Local\PeriDock-Compatibility-Preview", out var created);
         if (!created)
         {
             if (args.Contains("--startup")) return 0;
@@ -55,12 +69,8 @@ internal static class Program
 
 internal sealed class Controller
 {
-    internal List<BatteryState> States { get; } =
-    [
-        new("keyboard", "ROG 夜魔 X / Azoth X", "夜魔 X"),
-        new("mouse", "Razer 毒蝰 V3 Pro", "毒蝰 V3 Pro"),
-        new("headset", "Razer 旋风黑鲨 V3 Pro", "黑鲨 V3 Pro")
-    ];
+    internal List<BatteryState> States { get; } = [];
+    readonly Dictionary<string, DeviceTarget> targets = [];
     internal Forms.ContextMenuStrip TrayMenu { get; } = new();
     internal bool Exiting { get; private set; }
     readonly string root;
@@ -99,7 +109,8 @@ internal sealed class Controller
         TrayMenu.Items.Add(dockOption);
         startupOption = new Forms.ToolStripMenuItem("开机启动");
         startupOption.Click += (_, _) => SetStartupEnabled(!startupOption.Checked);
-        TrayMenu.Items.Add(startupOption);
+        // The preview must never replace the stable installation's startup registration.
+        startupOption.Enabled = false;
         TrayMenu.Opening += (_, _) => UpdateStartupOption();
         UpdateStartupOption();
         TrayMenu.Items.Add("刷新电量", null, (_, _) => _ = Refresh());
@@ -129,7 +140,7 @@ internal sealed class Controller
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         if (settings.ShowDock) host.Show();
         refreshTimer.Start(); uiTimer.Start();
-        log.Write("info", "app", "start", Program.AppName + " 0.1.1 started");
+        log.Write("info", "app", "start", Program.AppName + " 0.2.0-preview.1 started");
         if (showDetails) ShowDetails();
         else if (showPopover) popover.OpenAt(Anchor(), true);
         _ = Refresh();
@@ -220,12 +231,43 @@ internal sealed class Controller
         var errors = new List<string>();
         try
         {
+            var discovered = await DeviceReader.DiscoverIsolated(stop.Token);
+            if (Exiting) return;
+            foreach (var target in discovered)
+            {
+                targets[target.Id] = target;
+                if (States.All(s => s.Id != target.Id))
+                {
+                    States.Add(new(target.Id, target.Name, target.Name, target.Kind));
+                    log.Write("info", target.Id, "discover", target.Name + "; " + target.Kind + "; " + target.HardwareId +
+                        "; " + (target.Supported ? "adapter available; hardware verification required" : "battery protocol unavailable"));
+                }
+            }
+            var removed = States.Where(s => discovered.All(t => t.Id != s.Id)).ToArray();
+            foreach (var state in removed)
+            {
+                States.Remove(state); targets.Remove(state.Id); misses.Remove(state.Id); nextRead.Remove(state.Id);
+            }
+            States.Sort((a, b) =>
+            {
+                int Order(BatteryState value) => value.Kind == "keyboard" ? 0 : value.Kind == "mouse" ? 1 : 2;
+                var order = Order(a).CompareTo(Order(b));
+                return order == 0 ? string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase) : order;
+            });
+            UpdateViews();
+            using var probeSlots = new SemaphoreSlim(3);
             var jobs = States.Where(s => force || !nextRead.TryGetValue(s.Id, out var due) || due <= DateTimeOffset.UtcNow)
                 .Select(async state =>
                 {
+                    var acquired = false;
                     try
                     {
-                        var reading = await DeviceReader.RunIsolated(state.Id, stop.Token);
+                        await probeSlots.WaitAsync(stop.Token);
+                        acquired = true;
+                        var target = targets[state.Id];
+                        var reading = target.Supported ? await DeviceReader.RunTargetIsolated(target, stop.Token) :
+                            new Reading(null, null, null, null, "HID " + target.HardwareId, "已识别型号；电量协议尚未适配",
+                                ChargingNote: "未向未知型号发送查询；可导出诊断包申请适配");
                         state.Apply(reading, DateTimeOffset.UtcNow);
                         var missed = !state.LastReadSucceeded;
                         misses[state.Id] = missed ? misses.GetValueOrDefault(state.Id) + 1 : 0;
@@ -244,13 +286,14 @@ internal sealed class Controller
                         errors.Add(state.ShortName);
                         log.Write("error", state.Id, "read", reason, ex);
                     }
+                    finally { if (acquired) probeSlots.Release(); }
                     UpdateViews();
                 }).ToArray();
             await Task.WhenAll(jobs);
             if (Exiting) return;
-            message = errors.Count > 0 ? "读取异常 · 已记录日志" :
+            message = States.Count == 0 ? "未发现 ROG / Razer 外设" : errors.Count > 0 ? "读取异常 · 已记录日志" :
                 States.Any(s => !s.LastReadSucceeded) ? "部分设备未响应" :
-                States.Any(s => s.Cached) ? "键盘为系统缓存电量" : "暂无错误";
+                States.Any(s => s.Cached) ? "部分电量为系统缓存" : "暂无错误";
             var path = Path.Combine(root, "data", "status.json");
             var temp = path + ".tmp";
             await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(States, new JsonSerializerOptions { WriteIndented = true }));
@@ -263,8 +306,8 @@ internal sealed class Controller
     {
         if (Exiting) return;
         host.Update(States); popover.Update(States, refreshing); details.Update(States, refreshing, message);
-        var summary = "键盘 " + States[0].PercentText + " · 鼠标 " + States[1].PercentText + " · 耳机 " + States[2].PercentText;
-        tray.Text = summary.Length < 63 ? summary : Program.AppName;
+        var summary = string.Join(" · ", States.Select(s => s.Name + " " + s.PercentText));
+        tray.Text = summary.Length == 0 ? Program.AppName + " · 未发现外设" : summary.Length < 63 ? summary : summary[..60] + "…";
     }
     internal void OpenLogs()
     {

@@ -21,7 +21,11 @@ internal static class UiChecks
             Path.Combine(AppContext.BaseDirectory, "status.sample.json")));
         foreach (var value in snapshot.RootElement.EnumerateArray())
         {
-            var state = controller.States.Single(s => s.Id == value.GetProperty("Id").GetString());
+            var id = value.GetProperty("Id").GetString()!;
+            var name = value.TryGetProperty("Name", out var label) ? label.GetString()! : id;
+            var kind = value.TryGetProperty("Kind", out var category) ? category.GetString()! : id;
+            var state = new BatteryState(id, name, name, kind);
+            controller.States.Add(state);
             int? Number(string key) => value.GetProperty(key).ValueKind == JsonValueKind.Null ? null : value.GetProperty(key).GetInt32();
             var charging = value.GetProperty("Charging");
             state.Apply(new Reading(Number("Percent"), charging.ValueKind == JsonValueKind.Null ? null : charging.GetBoolean(),
@@ -44,6 +48,12 @@ internal static class UiChecks
             var dock = new DockWindow(controller);
             dock.Update(controller.States);
             windows.Add(("PeriDock-dock" + suffix, dock));
+            // Rebuild each existing surface after additions, removals and an empty list.
+            var transitions = controller.States.ToArray();
+            controller.States.Clear();
+            details.Update(controller.States, false, "暂无错误"); popover.Update(controller.States, false); dock.Update(controller.States);
+            controller.States.AddRange(transitions);
+            details.Update(controller.States, false, "暂无错误"); popover.Update(controller.States, false); dock.Update(controller.States);
         }
         AddWindows("");
         var failures = new List<string>();
@@ -62,6 +72,15 @@ internal static class UiChecks
             state.Apply(new Reading(null, null, null, null, state.Source, "未连接",
                 Connection: "未连接", Connected: false), DateTimeOffset.Now);
         AddWindows("-offline-test");
+        for (var i = 0; i < 8; i++)
+        {
+            var state = new BatteryState("extra-" + i, "Razer BlackWidow V4 Tenkeyless HyperSpeed " + i, "Extra", "keyboard");
+            state.Apply(new(76, false, null, null, "Test", "已连接", Connection: "2.4G", Connected: true), DateTimeOffset.Now);
+            controller.States.Add(state);
+        }
+        AddWindows("-many-test");
+        controller.States.Clear();
+        AddWindows("-empty-test");
         foreach (var (name, window) in windows)
         {
             var root = (FrameworkElement)window.Content;
@@ -79,9 +98,12 @@ internal static class UiChecks
             foreach (var text in Descendants(root).OfType<TextBlock>())
             {
                 if (text.Visibility != Visibility.Visible || string.IsNullOrEmpty(text.Text)) continue;
+                var inScroll = false;
+                for (var ancestor = VisualTreeHelper.GetParent(text); ancestor is not null; ancestor = VisualTreeHelper.GetParent(ancestor))
+                    if (ancestor is ScrollContentPresenter) { inScroll = true; break; }
                 var bounds = text.TransformToAncestor(root).TransformBounds(new Rect(text.RenderSize));
-                if (bounds.Left < -0.5 || bounds.Top < -0.5 ||
-                    bounds.Right > window.Width + 0.5 || bounds.Bottom > window.Height + 0.5)
+                if (!inScroll && (bounds.Left < -0.5 || bounds.Top < -0.5 ||
+                    bounds.Right > window.Width + 0.5 || bounds.Bottom > window.Height + 0.5))
                     failures.Add($"{name}: text outside window: {text.Text}; {bounds}");
                 for (var parent = VisualTreeHelper.GetParent(text); parent is not null && parent != root; parent = VisualTreeHelper.GetParent(parent))
                 {
@@ -104,6 +126,16 @@ internal static class UiChecks
                         failures.Add($"{name}: content overlaps another row at minimum window size");
                 }
                 Layout(window.Width, window.Height);
+            }
+            if (name.Contains("many-test"))
+            {
+                var scroll = Descendants(root).OfType<ScrollViewer>().Single();
+                if (window is DockWindow && scroll.ExtentWidth <= scroll.ViewportWidth ||
+                    window is not DockWindow && scroll.ExtentHeight <= scroll.ViewportHeight)
+                    failures.Add(name + ": many devices cannot scroll");
+                scroll.ScrollToEnd(); root.UpdateLayout();
+                if (window is DockWindow) scroll.ScrollToRightEnd();
+                root.UpdateLayout();
             }
             foreach (var dpi in new[] { 96d, 144d, 192d })
             {

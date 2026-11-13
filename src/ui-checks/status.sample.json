@@ -1,18 +1,18 @@
 [
   {
-    "Id": "keyboard", "Connection": "蓝牙", "Connected": true,
+    "Id": "keyboard", "Name": "ROG Azoth X", "Kind": "keyboard", "Connection": "蓝牙", "Connected": true,
     "Percent": 60, "Charging": null, "DpiX": null, "DpiY": null,
     "Source": "Synthetic UI fixture", "Status": "蓝牙已连接",
     "Cached": false, "ChargingNote": "蓝牙未提供充电状态"
   },
   {
-    "Id": "mouse", "Connection": "USB", "Connected": true,
+    "Id": "mouse", "Name": "Razer Viper V3 Pro", "Kind": "mouse", "Connection": "USB", "Connected": true,
     "Percent": 50, "Charging": true, "DpiX": 1600, "DpiY": 1600,
     "Source": "Synthetic UI fixture", "Status": "已连接",
     "Cached": false, "ChargingNote": null
   },
   {
-    "Id": "headset", "Connection": "USB", "Connected": true,
+    "Id": "headset", "Name": "Razer BlackShark V3 Pro", "Kind": "headset", "Connection": "USB", "Connected": true,
     "Percent": 70, "Charging": true, "DpiX": null, "DpiY": null,
     "Source": "Synthetic UI fixture", "Status": "已连接",
     "Cached": false, "ChargingNote": null

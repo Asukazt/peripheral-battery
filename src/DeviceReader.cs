@@ -9,7 +9,7 @@ using Windows.Storage.Streams;
 
 namespace PeriDock;
 
-internal static class DeviceReader
+internal static partial class DeviceReader
 {
     internal static async Task<Reading> Probe(string id)
     {
@@ -18,7 +18,7 @@ internal static class DeviceReader
             "keyboard" => await ReadKeyboard(),
             "mouse" => ReadMouse(),
             "headset" => await ReadHeadset(),
-            _ => throw new ArgumentException("Unknown device")
+            _ => await ProbeTarget(id)
         };
     }
 
@@ -132,9 +132,9 @@ internal static class DeviceReader
         }
     }
 
-    static async Task<(Reading? Value, string? Issue)> ReadKeyboardHid()
+    static async Task<(Reading? Value, string? Issue)> ReadKeyboardHid(IEnumerable<HidDevice>? selected = null)
     {
-        var devices = NativeDevices.EnumerateHid(0x0b05);
+        var devices = (selected ?? NativeDevices.EnumerateHid(0x0b05)).ToList();
         var candidates = devices.Where(d => d.UsagePage == 0xff00 && d.Usage == 1 &&
             (d.Product is 0x1c24 or 0x1c25 && d.InputBytes == 65 && d.OutputBytes == 65 ||
              d.Product == 0x1ace && d.InputBytes == 64 && d.OutputBytes == 64))
@@ -166,9 +166,9 @@ internal static class DeviceReader
         return (null, issue);
     }
 
-    static byte[] MouseQuery(Microsoft.Win32.SafeHandles.SafeFileHandle handle, byte commandClass, byte command, byte size)
+    static byte[] MouseQuery(Microsoft.Win32.SafeHandles.SafeFileHandle handle, byte commandClass, byte command, byte size, byte transaction = 0x1f)
     {
-        var request = Protocols.MouseRequest(commandClass, command, size);
+        var request = Protocols.MouseRequest(commandClass, command, size, transaction);
         if (!NativeDevices.HidD_SetFeature(handle, request, request.Length))
             throw new Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error(), "设备不接受查询");
         Thread.Sleep(60);
@@ -179,19 +179,21 @@ internal static class DeviceReader
             var response = new byte[91];
             if (!NativeDevices.HidD_GetFeature(handle, response, response.Length))
                 throw new Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error(), "无法读取设备应答");
-            if (Protocols.MouseMatches(response, commandClass, command)) return response;
-            if (response[1] is 3 or 4 or 5) return response;
+            if (Protocols.MouseMatches(response, commandClass, command, transaction)) return response;
+            if (response[2] == transaction && response[7] == commandClass && response[8] == command && response[1] is 3 or 4 or 5) return response;
             if (++attempts == 4) NativeDevices.HidD_SetFeature(handle, request, request.Length);
             Thread.Sleep(70);
         } while (deadline.ElapsedMilliseconds < 700);
         throw new IOException("未收到匹配的应答，设备可能休眠或接口正被其他软件使用");
     }
 
-    static Reading ReadMouse()
+    static Reading ReadMouse(IEnumerable<HidDevice>? selected = null, DeviceProfile? profile = null)
     {
-        var devices = NativeDevices.EnumerateHid()
-            .Where(d => d.Product is 0x00c0 or 0x00c1 && d.FeatureBytes >= 91)
-            .OrderByDescending(d => d.Product == 0x00c0)
+        var transaction = profile?.Transaction ?? (byte)0x1f;
+        var devices = (selected ?? NativeDevices.EnumerateHid().Where(d => d.Product is 0x00c0 or 0x00c1))
+            .Where(d => d.FeatureBytes >= 91)
+            .OrderByDescending(d => DeviceCatalog.RazerInterface(d.Product) is int index &&
+                d.Path.Contains($"mi_{index:x2}", StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(d => d.UsagePage == 0xff00).ToList();
         if (devices.Count == 0) return new(null, null, null, null, "Razer HID", "未发现鼠标接口",
             Connection: "未连接", Connected: false);
@@ -202,8 +204,8 @@ internal static class DeviceReader
             try
             {
                 using var handle = NativeDevices.Open(device.Path, metadataOnly: true);
-                var batteryPacket = MouseQuery(handle, 7, 0x80, 2);
-                var battery = Protocols.MouseValue(batteryPacket, 7, 0x80);
+                var batteryPacket = MouseQuery(handle, 7, 0x80, 2, transaction);
+                var battery = Protocols.MouseValue(batteryPacket, 7, 0x80, transaction);
                 if (battery is null)
                 {
                     if (batteryPacket[1] == 4) disconnected = true;
@@ -213,17 +215,21 @@ internal static class DeviceReader
                 (int X, int Y)? dpi = null;
                 try
                 {
-                    var value = Protocols.MouseValue(MouseQuery(handle, 7, 0x84, 2), 7, 0x84);
+                    var value = Protocols.MouseValue(MouseQuery(handle, 7, 0x84, 2, transaction), 7, 0x84, transaction);
                     charging = value is 0 ? false : value is 1 ? true : null;
                 }
                 catch (IOException) { }
                 catch (Win32Exception) { }
-                try { dpi = Protocols.MouseDpi(MouseQuery(handle, 4, 0x85, 7)); }
+                try
+                {
+                    if (profile is null || profile.Kind == "mouse" && transaction == 0x1f)
+                        dpi = Protocols.MouseDpi(MouseQuery(handle, 4, 0x85, 7, transaction), transaction);
+                }
                 catch (IOException) { }
                 catch (Win32Exception) { }
                 return new((int)Math.Round(battery.Value * 100d / 255), charging, dpi?.X, dpi?.Y,
                     "Razer HID · 电量 / DPI 读取", "已连接",
-                    Connection: Protocols.RazerConnection(device.Product), Connected: true);
+                    Connection: profile?.Connection ?? Protocols.RazerConnection(device.Product), Connected: true);
             }
             catch (Exception ex) when (ex is IOException or Win32Exception) { last = ex; }
         }

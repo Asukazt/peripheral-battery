@@ -13,6 +13,9 @@ namespace PeriDock;
 internal sealed class DockWindow : Window
 {
     readonly List<(TextBlock Percent, Ellipse Dot, Grid Tile)> tiles = [];
+    readonly Grid grid;
+    readonly ScrollViewer scroll;
+    string tileKey = "";
     internal DockWindow(Controller controller)
     {
         Title = Program.AppName + " · 常驻悬浮窗";
@@ -20,27 +23,13 @@ internal sealed class DockWindow : Window
         ResizeMode = ResizeMode.NoResize;
         ShowInTaskbar = false; ShowActivated = false; Topmost = true;
         var frame = WindowFrame(this);
-        var grid = new Grid { Margin = new Thickness(8, 5, 8, 5) }; frame.Child = grid;
-        for (var i = 0; i < controller.States.Count; i++)
-        {
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var tile = new Grid { Margin = new Thickness(4, 0, 4, 0) };
-            tile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
-            tile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            tile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
-            tile.Children.Add(Product(controller.States[i].Id, 68, 54));
-            var percent = Text("--", 19, Ink, FontWeights.SemiBold);
-            percent.TextWrapping = TextWrapping.NoWrap;
-            Grid.SetColumn(percent, 1); tile.Children.Add(percent);
-            var dot = Dot(10); Grid.SetColumn(dot, 2); tile.Children.Add(dot);
-            Grid.SetColumn(tile, i); grid.Children.Add(tile);
-            if (i < 2)
-            {
-                var separator = new Border { Width = 1, Height = 40, Background = Line, HorizontalAlignment = HorizontalAlignment.Right };
-                Grid.SetColumn(separator, i); grid.Children.Add(separator);
-            }
-            tiles.Add((percent, dot, tile));
-        }
+        grid = new Grid { Margin = new Thickness(8, 5, 8, 5) };
+        scroll = new ScrollViewer { Content = grid, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden };
+        scroll.PreviewMouseWheel += (_, e) => { scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset - e.Delta); e.Handled = true; };
+        frame.Child = scroll;
+        System.Windows.Automation.AutomationProperties.SetName(scroll, "外设列表");
+        BuildTiles(controller.States);
         System.Windows.Automation.AutomationProperties.SetName(this, Program.AppName + " 常驻悬浮窗");
         MouseLeftButtonDown += (_, e) =>
         {
@@ -64,6 +53,33 @@ internal sealed class DockWindow : Window
         Update(controller.States);
     }
 
+    void BuildTiles(IReadOnlyList<BatteryState> states)
+    {
+        grid.Children.Clear(); grid.ColumnDefinitions.Clear(); tiles.Clear();
+        Width = Math.Max(180, Math.Min(640, states.Count * 156 + 18));
+        if (states.Count == 0) grid.Children.Add(Text("暂无外设", 14, Muted));
+        for (var i = 0; i < states.Count; i++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(156) });
+            var tile = new Grid { Margin = new Thickness(4, 0, 4, 0) };
+            tile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
+            tile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            tile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+            tile.Children.Add(Product(states[i].Kind, 68, 54));
+            var percent = Text("--", 19, Ink, FontWeights.SemiBold);
+            percent.TextWrapping = TextWrapping.NoWrap;
+            Grid.SetColumn(percent, 1); tile.Children.Add(percent);
+            var dot = Dot(10); Grid.SetColumn(dot, 2); tile.Children.Add(dot);
+            Grid.SetColumn(tile, i); grid.Children.Add(tile);
+            if (i < states.Count - 1)
+            {
+                var separator = new Border { Width = 1, Height = 40, Background = Line, HorizontalAlignment = HorizontalAlignment.Right };
+                Grid.SetColumn(separator, i); grid.Children.Add(separator);
+            }
+            tiles.Add((percent, dot, tile));
+        }
+    }
+
     internal void PositionAtCorner()
     {
         var screen = Forms.Screen.FromHandle(new WindowInteropHelper(this).Handle);
@@ -75,6 +91,8 @@ internal sealed class DockWindow : Window
 
     internal void Update(IReadOnlyList<BatteryState> states)
     {
+        var key = string.Join("|", states.Select(s => s.Id));
+        if (key != tileKey) { tileKey = key; BuildTiles(states); if (IsVisible) PositionAtCorner(); }
         for (var i = 0; i < tiles.Count; i++)
         {
             var state = states[i];
@@ -82,7 +100,7 @@ internal sealed class DockWindow : Window
             tiles[i].Percent.Foreground = state.IsStale(DateTimeOffset.UtcNow) ? Muted : state.Percent <= 25 ? Amber : Ink;
             tiles[i].Dot.Fill = StateBrush(state);
             tiles[i].Tile.ToolTip = $"{state.Name} · {state.PercentText}\n{state.Connection}" +
-                (state.Id == "mouse" ? " · " + state.DpiText : "") + "\n" + StateText(state) +
+                (state.Kind == "mouse" ? " · " + state.DpiText : "") + "\n" + StateText(state) +
                 (state.ChargingNote is null ? "" : "\n" + state.ChargingNote);
         }
     }

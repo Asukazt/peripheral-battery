@@ -282,5 +282,119 @@ Check("startup registration quotes paths and disabling preserves unrelated entri
     }
     finally { Registry.CurrentUser.DeleteSubKeyTree(keyPath, false); }
 });
+Check("Razer transaction families validate their own replies and reject foreign ids", () =>
+{
+    foreach (var transaction in new byte[] { 0x1f, 0x3f, 0x9f, 0xff })
+    {
+        var packet = Protocols.MouseRequest(7, 0x80, 2, transaction);
+        packet[1] = 2; packet[10] = 128; packet[89] ^= 128;
+        Equal<int?>(128, Protocols.MouseValue(packet, 7, 0x80, transaction));
+        Equal<int?>(null, Protocols.MouseValue(packet, 7, 0x80, (byte)(transaction ^ 1)));
+    }
+});
+Check("ROG mouse percentages and coarse gauges reject standby and invalid replies", () =>
+{
+    var packet = new byte[65]; packet[1] = 0x12; packet[2] = 7; packet[5] = 76;
+    Equal((76, (bool?)false), Protocols.AsusMousePower(packet, 1) ?? (-1, null));
+    packet[5] = 3;
+    Equal((75, (bool?)false), Protocols.AsusMousePower(packet, 25) ?? (-1, null));
+    packet[5] = 5;
+    Equal<(int, bool?)?>(null, Protocols.AsusMousePower(packet, 25));
+    packet[5] = 0;
+    Equal<(int, bool?)?>(null, Protocols.AsusMousePower(packet, 1));
+    packet[10] = 1;
+    Equal((0, (bool?)true), Protocols.AsusMousePower(packet, 1) ?? (-1, null));
+    packet[2] = 8;
+    Equal<(int, bool?)?>(null, Protocols.AsusMousePower(packet, 1));
+});
+Check("Falchion uses the percentage field instead of the ten-step gauge", () =>
+{
+    var packet = new byte[65]; packet[1] = 0x12; packet[2] = 1; packet[6] = 8; packet[11] = 76;
+    Equal(76, Protocols.KeyboardPower(packet, 0, 11)?.Percent ?? -1);
+    Equal<(int, bool?)?>(null, Protocols.KeyboardPower(packet[..11], 0, 11));
+});
+Check("catalog groups HID collections by physical container, keeping identical mice separate", () =>
+{
+    var a = new HidDevice("a", 0x00c1, 0xff00, 1, 0, 0, 91, Container: "container-1");
+    var b = a with { Path = "b", UsagePage = 1 };
+    var c = a with { Path = "c", Container = "container-2" };
+    var targets = DeviceCatalog.FromHid([a, b, c]);
+    Equal(2, targets.Count);
+    Equal(2, targets[0].Interfaces.Length);
+    Equal(false, targets[0].Id == targets[1].Id);
+    Equal(true, targets.All(t => t.Kind == "mouse" && t.Supported));
+});
+Check("unlisted and wired-only products never gain a battery protocol from the vendor alone", () =>
+{
+    Equal<DeviceProfile?>(null, DeviceCatalog.Find(0x1532, 0x00cb));
+    Equal<DeviceProfile?>(null, DeviceCatalog.Find(0x9999, 0x00c1));
+    var device = new HidDevice("unknown", 0xffff, 0xff00, 1, 65, 65, 91, Name: "Razer New Wireless Mouse");
+    var targets = DeviceCatalog.FromHid([device]);
+    Equal(1, targets.Count); Equal(false, targets[0].Supported);
+    Equal(true, DeviceCatalog.Profiles.Select(p => (p.Vendor, p.Product)).Distinct().Count() == DeviceCatalog.Profiles.Count);
+});
+Check("ROG headset payload validates both earbuds and keeps charging unknown on malformed responses", () =>
+{
+    var p = new byte[64]; p[0] = 0xcc; p[1] = 0x12; p[2] = 7; p[6] = 82; p[7] = 65; p[8] = 50;
+    Equal(65, Protocols.AsusHeadsetPower(p, 0x1ad3)?.Percent ?? -1);
+    Equal(82, Protocols.AsusHeadsetPower(p, 0x1afa)?.Percent ?? -1);
+    p[7] = 255;
+    Equal<(int, bool?)?>(null, Protocols.AsusHeadsetPower(p, 0x1ad3));
+    p[2] = 8; p[5] = 3;
+    Equal<bool?>(true, Protocols.AsusHeadsetCharging(p, 0x1ad3));
+    Equal<bool?>(null, Protocols.AsusHeadsetCharging(p, 0x1afa));
+    p[0] = 0;
+    Equal<bool?>(null, Protocols.AsusHeadsetCharging(p, 0x1ad3));
+});
+Check("2020 headset hides unreliable charging levels and refuses stale receiver replies", () =>
+{
+    var p = new byte[64]; Convert.FromHexString("FF0F05FE12041F08050305010EA03200").CopyTo(p, 0);
+    Equal(((int?)50, (bool?)false), Protocols.Razer2020Power(p) ?? (-1, null));
+    p[11] = 9; p[14] = 80;
+    Equal(((int?)null, (bool?)true), Protocols.Razer2020Power(p) ?? (-1, null));
+    p[1] = 1; p[2] = 0;
+    Equal<(int?, bool?)?>(null, Protocols.Razer2020Power(p));
+});
+Check("PA headset variants reject wrong commands, oversized payloads and impossible battery values", () =>
+{
+    foreach (ushort product in new ushort[] { 0x0555, 0x0556, 0x053a })
+    {
+        var query = Protocols.PaRequest(product, 0x21);
+        Equal(64, query.Length);
+        var echo = product == 0x053a ? 13 : 12;
+        var p = new byte[64]; p[0] = query[0]; p[3] = 0x50; p[4] = 0x49;
+        p[echo] = 0x21; p[echo + 1] = 1; p[echo + 2] = 1; p[echo + 3] = 76;
+        Equal<int?>(76, Protocols.PaValue(p, product, 0x21));
+        Equal<int?>(null, Protocols.PaValue(p, product, 0x2a));
+        p[echo + 3] = 101;
+        Equal<int?>(null, Protocols.PaValue(p, product, 0x21));
+        p[echo + 3] = 76; p[echo + 2] = 60;
+        Equal<int?>(null, Protocols.PaValue(p, product, 0x21));
+        var on = Protocols.PaRequest(product, 0xe1, true);
+        var off = Protocols.PaRequest(product, 0xe1, false);
+        Equal(1, on.Zip(off).Count(pair => pair.First != pair.Second));
+    }
+});
+Check("Bluetooth model suffixes classify correctly and serialized discovery excludes local HID paths", () =>
+{
+    Equal("headset", DeviceCatalog.Kind("ROG DELTA II (BT)"));
+    Equal("keyboard", DeviceCatalog.Kind("ROG AZOTH X"));
+    Equal("mouse", DeviceCatalog.Kind("Razer Basilisk V3 Pro 35K"));
+    var device = new HidDevice("private-device-path", 0x00c1, 0xff00, 1, 0, 0, 91, Container: "private-container");
+    var json = JsonSerializer.Serialize(DeviceCatalog.FromHid([device]));
+    Equal(false, json.Contains("private-"));
+    Equal(true, json.Contains("1532:00c1"));
+});
 Console.WriteLine($"{checks - failures.Count}/{checks} checks passed");
+if (failures.Count == 0 && args.Length == 2 && args[0] == "--catalog")
+{
+    var profiles = DeviceCatalog.Profiles;
+    var catalog = profiles.Select(p => new {
+        vid = $"{p.Vendor:x4}", pid = $"{p.Product:x4}", p.Name, p.Kind, p.Reader, p.Connection,
+        protocolAvailable = p.Reader != "Unsupported", hardwareVerified = false
+    });
+    File.WriteAllText(args[1], JsonSerializer.Serialize(catalog, new JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine($"Catalog: {profiles.Count} product IDs, {profiles.Select(p => p.Name).Distinct().Count()} names; " +
+        $"{profiles.Count(p => p.Reader != "Unsupported")} IDs with protocol adapters");
+}
 return failures.Count == 0 ? 0 : 1;

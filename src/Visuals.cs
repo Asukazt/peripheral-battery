@@ -70,6 +70,12 @@ internal static class Visuals
 
     internal static Image Product(string id, double width, double height)
     {
+        if (id is not ("keyboard" or "mouse" or "headset"))
+        {
+            var generic = Icon("battery-full", Math.Min(width, height), Muted);
+            generic.Width = width; generic.Height = height;
+            return generic;
+        }
         var file = id + "-display.png";
         return new Image
         {

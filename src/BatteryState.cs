@@ -3,11 +3,12 @@ namespace PeriDock;
 internal record Reading(int? Percent, bool? Charging, int? DpiX, int? DpiY, string Source, string Status,
     bool Cached = false, string Connection = "待确认", bool? Connected = null, string? ChargingNote = null);
 
-internal sealed class BatteryState(string id, string name, string shortName)
+internal sealed class BatteryState(string id, string name, string shortName, string? kind = null)
 {
     public string Id { get; } = id;
     public string Name { get; } = name;
     public string ShortName { get; } = shortName;
+    public string Kind { get; } = kind ?? id;
     public string Connection { get; private set; } = "识别中";
     public bool? Connected { get; private set; }
     public string? ChargingNote { get; private set; }

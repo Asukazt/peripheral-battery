@@ -20,7 +20,7 @@ internal sealed class Diagnostics
         return Regex.Replace(text, @"(?i)\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b", "[address]");
     }
     object Entry(string level, string device, string operation, string message, Exception? error)
-        => new { time = DateTimeOffset.Now, version = "0.1.1", level, device, operation,
+        => new { time = DateTimeOffset.Now, version = "0.2.0-preview.1", level, device, operation,
             message = Redact(message), exception = error?.GetType().Name,
             stack = error is null ? null : Redact(error.ToString()) };
     internal void Write(string level, string device, string operation, string message, Exception? error = null)
@@ -76,7 +76,7 @@ internal sealed class Diagnostics
             var path = Path.Combine(folder, $"Peripheral-Battery-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss-fff}.zip");
             using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
             using (var writer = new StreamWriter(zip.CreateEntry("status.json").Open()))
-                writer.Write(JsonSerializer.Serialize(new { version = "0.1.1", time = DateTimeOffset.Now,
+                writer.Write(JsonSerializer.Serialize(new { version = "0.2.0-preview.1", time = DateTimeOffset.Now,
                     os = Environment.OSVersion.VersionString, devices = states.Select(s => new {
                         s.Id, s.Name, s.Connection, s.Connected, s.Percent, s.Charging, s.ChargingNote, s.DpiX, s.DpiY,
                         s.LastSuccess, s.Source, s.Status, s.Cached }) }, new JsonSerializerOptions { WriteIndented = true }));

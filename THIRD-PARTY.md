@@ -1,6 +1,6 @@
 # Third-party notices
 
-Peripheral Battery 0.1.1 is an unofficial Windows peripheral battery utility.
+Peripheral Battery 0.2.0-preview.1 is an unofficial Windows peripheral battery utility.
 Original application code is MIT-licensed; upstream notices remain applicable.
 
 ## Protocol implementations
@@ -9,7 +9,8 @@ Original application code is MIT-licensed; upstream notices remain applicable.
   havioo/scythe, commit ee0cee03c7d83e628a78ef25ceeb4991f38a7430:
   https://github.com/havioo/scythe
   MIT license: docs/licenses/LICENSE-scythe.txt.
-- Razer mouse battery feature reports are adapted from HeyOkay/HaloBattery,
+- Razer mouse/keyboard feature reports, legacy headset protocols and ASUS
+  device identifiers are adapted from HeyOkay/HaloBattery,
   commit 2251f0534a8e886c9692ead42056059b4f69d8c0:
   https://github.com/HeyOkay/HaloBattery
   MIT license: docs/licenses/LICENSE-halobattery.txt.
@@ -26,6 +27,12 @@ Original application code is MIT-licensed; upstream notices remain applicable.
   Upstream source is not bundled.
   https://gearlink.asus.com/view/7204/manifest.json
   https://github.com/seerge/g-helper
+- Additional ASUS model identifiers, power field offsets, mouse gauge scales
+  and headset read commands were cross-checked against seerge/g-helper,
+  commit a4efd01c8ba10d103da04c4c895ef849a96f6437, app/Peripherals/.
+  Only protocol facts are independently encoded; no GHelper GPL source is
+  copied or bundled. Razer model/interface references were cross-checked
+  against the OpenRazer commit above; no OpenRazer GPL source is bundled.
 - Bluetooth charging fields use Battery Service 1.1, cross-checked against
   Zephyr commit 36118765dd7f40a6c81dc9e281996346245fac7c.
   No Zephyr implementation is copied.

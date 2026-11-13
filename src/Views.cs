@@ -26,7 +26,7 @@ internal sealed class DeviceRow
         Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(compact ? 86 : 220) });
         Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(compact ? 144 : 230) });
-        var image = Product(state.Id, compact ? 78 : 184, compact ? 74 : 128);
+        var image = Product(state.Kind, compact ? 78 : 184, compact ? 74 : 128);
         image.HorizontalAlignment = HorizontalAlignment.Center;
         Root.Children.Add(image);
         var labels = new StackPanel
@@ -35,7 +35,10 @@ internal sealed class DeviceRow
             Margin = new Thickness(compact ? 8 : 18, 0, 12, 0)
         };
         Grid.SetColumn(labels, 1); Root.Children.Add(labels);
-        labels.Children.Add(Text(ProductName(state.Id), compact ? 15 : 18, Ink, FontWeights.SemiBold));
+        var name = Text(state.Name, compact ? 13 : 16, Ink, FontWeights.SemiBold);
+        name.MaxHeight = compact ? 40 : 64;
+        name.TextTrimming = TextTrimming.CharacterEllipsis;
+        labels.Children.Add(name);
         var connection = new Grid { Margin = new Thickness(0, compact ? 10 : 14, 0, 0) };
         connection.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
         connection.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -43,6 +46,8 @@ internal sealed class DeviceRow
         connectionIcon.HorizontalAlignment = HorizontalAlignment.Left;
         connection.Children.Add(connectionIcon);
         extra = Text("", compact ? 12 : 14, Muted);
+        extra.MaxHeight = compact ? 32 : 48;
+        extra.TextTrimming = TextTrimming.CharacterEllipsis;
         Grid.SetColumn(extra, 1); connection.Children.Add(extra); labels.Children.Add(connection);
         var battery = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(battery, 2); Root.Children.Add(battery);
@@ -78,7 +83,7 @@ internal sealed class DeviceRow
         fill.Width = barWidth * (state.Percent ?? 0) / 100d;
         fill.Background = stale ? Muted : state.Percent <= 25 ? Amber : Green;
         extra.Text = state.Connection +
-            (state.Id == "mouse" ? " · " + state.DpiText + (state.DpiText == "未知" ? " DPI" : "") : "") +
+            (state.Kind == "mouse" ? " · " + state.DpiText + (state.DpiText == "未知" ? " DPI" : "") : "") +
             (compact && state.Charging == true ? " · 充电中" : "");
         var icon = state.Connection == "蓝牙" ? "bluetooth" :
             state.Connection == "USB" ? "usb" : state.Connection.Contains("2.4G") ? "radio-tower" : "ellipsis";
@@ -95,13 +100,15 @@ internal sealed class DeviceRow
 internal sealed class Popover : Window
 {
     readonly List<DeviceRow> rows = [];
+    readonly StackPanel list;
+    string rowKey = "";
     readonly TextBlock footer;
     readonly Button refresh;
     internal bool Pinned { get; set; }
 
     internal Popover(Controller controller)
     {
-        Title = Program.AppName + " · 电量"; Width = 496; Height = 426;
+        Title = Program.AppName + " · 电量"; Width = 540; Height = 426;
         ResizeMode = ResizeMode.NoResize; ShowInTaskbar = false; Topmost = true; ShowActivated = false;
         var frame = WindowFrame(this);
         var grid = new Grid(); frame.Child = grid;
@@ -114,12 +121,9 @@ internal sealed class Popover : Window
         header.Children.Add(Brand());
         var headerFrame = new Border { Child = header, BorderBrush = Line, BorderThickness = new Thickness(0, 0, 0, 1) };
         grid.Children.Add(headerFrame);
-        var list = new StackPanel { Margin = new Thickness(20, 6, 20, 6), VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetRow(list, 1); grid.Children.Add(list);
-        foreach (var state in controller.States)
-        {
-            var row = new DeviceRow(state, true); rows.Add(row); list.Children.Add(row.Root);
-        }
+        list = new StackPanel { Margin = new Thickness(20, 6, 20, 6) };
+        var scroll = new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        Grid.SetRow(scroll, 1); grid.Children.Add(scroll);
         footer = Text("等待首次读取", 13, Muted); footer.Margin = new Thickness(20, 0, 20, 0);
         var bottom = new Border { Child = footer, BorderBrush = Line, BorderThickness = new Thickness(0, 1, 0, 0) };
         Grid.SetRow(bottom, 2); grid.Children.Add(bottom);
@@ -131,9 +135,19 @@ internal sealed class Popover : Window
 
     internal void Update(IReadOnlyList<BatteryState> states, bool refreshing)
     {
+        var key = string.Join("|", states.Select(s => s.Id));
+        if (key != rowKey || rows.Count == 0)
+        {
+            rowKey = key; rows.Clear(); list.Children.Clear();
+            foreach (var state in states)
+            {
+                var row = new DeviceRow(state, true); rows.Add(row); list.Children.Add(row.Root);
+            }
+            if (states.Count == 0) list.Children.Add(Text("未发现 ROG / Razer 外设", 14, Muted));
+        }
         for (var i = 0; i < rows.Count; i++) rows[i].Update(states[i]);
         refresh.IsEnabled = !refreshing;
-        var last = states.Max(s => s.LastSuccess);
+        var last = states.Select(s => s.LastSuccess).DefaultIfEmpty().Max();
         footer.Text = refreshing ? "正在更新…" : last.HasValue ? $"更新于 {last.Value.ToLocalTime():HH:mm}" : "等待首次读取";
     }
 
@@ -155,6 +169,8 @@ internal sealed class Popover : Window
 internal sealed class DetailWindow : Window
 {
     readonly List<DeviceRow> rows = [];
+    readonly StackPanel list;
+    string rowKey = "";
     readonly TextBlock status;
     readonly Ellipse dot;
     readonly Button refresh;
@@ -200,13 +216,9 @@ internal sealed class DetailWindow : Window
         };
         var headerFrame = new Border { Child = header, BorderBrush = Line, BorderThickness = new Thickness(0, 0, 0, 1) };
         grid.Children.Add(headerFrame);
-        var list = new StackPanel { Margin = new Thickness(22, 4, 22, 4), VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetRow(list, 1); grid.Children.Add(list);
-        for (var i = 0; i < controller.States.Count; i++)
-        {
-            var row = new DeviceRow(controller.States[i], false); rows.Add(row); list.Children.Add(row.Root);
-            if (i < 2) list.Children.Add(new Border { Height = 1, Background = Line });
-        }
+        list = new StackPanel { Margin = new Thickness(22, 4, 22, 4) };
+        var scroll = new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        Grid.SetRow(scroll, 1); grid.Children.Add(scroll);
         var bottom = new DockPanel { LastChildFill = true, Margin = new Thickness(18, 0, 22, 0) };
         var bottomFrame = new Border { Child = bottom, BorderBrush = Line, BorderThickness = new Thickness(0, 1, 0, 0) };
         Grid.SetRow(bottomFrame, 2); grid.Children.Add(bottomFrame);
@@ -237,6 +249,17 @@ internal sealed class DetailWindow : Window
 
     internal void Update(IReadOnlyList<BatteryState> states, bool refreshing, string message)
     {
+        var key = string.Join("|", states.Select(s => s.Id));
+        if (key != rowKey || rows.Count == 0)
+        {
+            rowKey = key; rows.Clear(); list.Children.Clear();
+            foreach (var state in states)
+            {
+                if (rows.Count > 0) list.Children.Add(new Border { Height = 1, Background = Line });
+                var row = new DeviceRow(state, false); rows.Add(row); list.Children.Add(row.Root);
+            }
+            if (states.Count == 0) list.Children.Add(Text("未发现 ROG / Razer 外设", 16, Muted));
+        }
         for (var i = 0; i < rows.Count; i++) rows[i].Update(states[i]);
         refresh.IsEnabled = !refreshing;
         status.Text = refreshing ? "正在读取…" : message;
