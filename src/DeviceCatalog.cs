@@ -34,7 +34,7 @@ internal static partial class DeviceCatalog
     {
         var candidates = devices.Where(d => Vendors.Contains(d.Vendor)).ToArray();
         return candidates.GroupBy(d => $"{d.Vendor:x4}:{d.Product:x4}:{(d.Container.Length > 0 ? d.Container : d.Path)}")
-            .Where(group => group.Any(d => d.Vendor is 0x1532 or 0x0b05 or 0x046d || ProfileFor(d) is not null || IsBranded(d.Name)))
+            .Where(group => group.Any(d => d.Vendor is 0x1532 or 0x046d || ProfileFor(d) is not null || IsBranded(d.Name)))
             .Select(group =>
             {
                 var first = group.First();

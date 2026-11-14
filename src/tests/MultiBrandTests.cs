@@ -12,6 +12,11 @@ internal static class MultiBrandTests
             foreach (var name in new[] { "Logitech MX Master 3S", "罗技 K780", "HyperX Cloud III", "MCHOSE G7", "迈从 K87", "ATK X1", "AULA F75", "狼蛛 F87", "VGN F1", "VXE R1" }) Equal(true, DeviceCatalog.IsBranded(name));
             Equal(false, DeviceCatalog.IsBranded("CHATK keyboard")); Equal(false, DeviceCatalog.IsBranded("INVGN device"));
         });
+        check("unrelated ASUS motherboard lighting controllers are not discovered as battery peripherals", () =>
+        {
+            Equal(0,DeviceCatalog.FromHid([Device(0x0b05,0x19af,0xff00,1,"AURA LED Controller")]).Count);
+            Equal(1,DeviceCatalog.FromHid([Device(0x0b05,0x1c24,0xff00,1,"HID compliant")]).Count);
+        });
         check("known new devices route by VID PID and preserve two identical physical units", () =>
         {
             var found = DeviceCatalog.FromHid([Device(0x3554,0xf505,0xff02,2), Device(0x3554,0xf505,0xff02,2,container:"two"),
