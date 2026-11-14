@@ -310,7 +310,8 @@ internal sealed class Controller
             await Task.WhenAll(jobs);
             if (Exiting) return;
             message = States.Count == 0 ? "未发现 ROG / Razer 外设" : errors.Count > 0 ? "读取异常 · 已记录日志" :
-                States.Any(s => s.Failure == ReadFailure.AccessDenied) ? "访问被拒绝 · 可选择管理员重启" :
+                States.Any(s => s.Failure == ReadFailure.AccessDenied) ?
+                    (Elevation.IsElevated ? "管理员权限下仍被拒绝 · 请检查驱动或设备接口" : "访问被拒绝 · 可选择管理员重启") :
                 States.Any(s => !s.LastReadSucceeded) ? "部分设备未响应" :
                 States.Any(s => s.Cached) ? "部分电量为系统缓存" : "暂无错误";
             var path = Path.Combine(root, "data", "status.json");
