@@ -21,6 +21,7 @@ void Equal<T>(T expected, T actual)
         throw new Exception($"Expected {expected}, got {actual}");
 }
 
+MultiBrandTests.Run(Check);
 Check("mouse battery request has the documented command and checksum", () =>
 {
     var p = Protocols.MouseRequest(0x07, 0x80, 2);
@@ -861,6 +862,7 @@ if (failures.Count == 0 && args.Length == 2 && args[0] == "--catalog")
     var profiles = DeviceCatalog.Profiles;
     var catalog = profiles.Select(p => new {
         vid = $"{p.Vendor:x4}", pid = $"{p.Product:x4}", p.Name, p.Kind, p.Reader, p.Connection,
+        productNamePrefix = p.MatchName,
         protocolAvailable = p.Reader != "Unsupported", hardwareVerified = false
     });
     File.WriteAllText(args[1], JsonSerializer.Serialize(catalog, new JsonSerializerOptions { WriteIndented = true }));

@@ -8,6 +8,7 @@ internal record Reading(int? Percent, bool? Charging, int? DpiX, int? DpiY, stri
 
 internal sealed class BatteryState(string id, string name, string shortName, string? kind = null)
 {
+    MchoseG7Filter? g7Filter;
     public string Id { get; } = id;
     public string Name { get; } = name;
     public string ShortName { get; } = shortName;
@@ -36,6 +37,8 @@ internal sealed class BatteryState(string id, string name, string shortName, str
         now - LastSuccess.Value > TimeSpan.FromSeconds(90);
     public void Apply(Reading value, DateTimeOffset now)
     {
+        if(value.Failure!=ReadFailure.None || value.Connected==false)g7Filter=null;
+        if(value.Source=="MCHOSE G7 HID")value=(g7Filter??=new()).Apply(value,now);
         var valid = value.Failure == ReadFailure.None && value.Percent is >= 0 and <= 100;
         LastReadSucceeded = valid && !value.Cached && value.Connected != false;
         Failure = value.Failure;

@@ -11,9 +11,13 @@ namespace PeriDock;
 
 internal static partial class DeviceReader
 {
-    internal static async Task<List<DeviceTarget>> Discover()
+    internal static async Task<List<DeviceTarget>> Discover(IEnumerable<DeviceTarget>? known = null)
     {
-        var targets = DeviceCatalog.FromHid(NativeDevices.EnumerateHid(0x1532).Concat(NativeDevices.EnumerateHid(0x0b05)));
+        var targets = DeviceCatalog.FromHid(NativeDevices.EnumerateHid(0));
+        var receivers = targets.Where(t => t.Interfaces.Any(d => DeviceCatalog.ProfileFor(d)?.Reader == "LogitechReceiver")).ToArray();
+        var expanded = await Task.WhenAll(receivers.Select(t => LogitechReader.Expand(t, known ?? [])));
+        foreach (var receiver in receivers) targets.Remove(receiver);
+        foreach (var slots in expanded) targets.AddRange(slots);
         foreach (var lowEnergy in new[] { true, false })
         {
             try
@@ -37,9 +41,9 @@ internal static partial class DeviceReader
         return targets;
     }
 
-    internal static async Task<List<DeviceTarget>> DiscoverIsolated(CancellationToken token)
+    internal static async Task<List<DeviceTarget>> DiscoverIsolated(CancellationToken token, IEnumerable<DeviceTarget>? known = null)
     {
-        var result = await RunChild("--discover", null, token, 12);
+        var result = await RunChild("--discover-known", JsonSerializer.Serialize(known?.ToArray() ?? []), token, 12);
         return JsonSerializer.Deserialize<List<DeviceTarget>>(result) ?? throw new IOException("设备列表为空");
     }
 
@@ -84,8 +88,15 @@ internal static partial class DeviceReader
     {
         if (requested.BluetoothId is not null) return await ReadBluetooth(requested);
         // Re-enumerate instead of trusting paths or protocol claims supplied to the child process.
-        var target = DeviceCatalog.FromHid(NativeDevices.EnumerateHid(0x1532).Concat(NativeDevices.EnumerateHid(0x0b05)))
-            .FirstOrDefault(t => t.Id == requested.Id);
+        var physical = DeviceCatalog.FromHid(NativeDevices.EnumerateHid(0));
+        var target = physical.FirstOrDefault(t => t.Id == requested.Id);
+        if (requested.LogitechSlot is >= 1 and <= 6 && requested.ReceiverId is not null)
+        {
+            var receiver = physical.FirstOrDefault(t => t.Id == requested.ReceiverId &&
+                t.Interfaces.Any(d => DeviceCatalog.ProfileFor(d)?.Reader == "LogitechReceiver"));
+            if (receiver is not null && requested.Id == LogitechReader.SlotId(receiver, requested.LogitechSlot.Value))
+                target = LogitechReader.Slot(receiver, requested.LogitechSlot.Value, requested.Name, requested.Kind);
+        }
         if (target is null) return Missing();
         return await ReadHidTarget(target);
     }
@@ -94,7 +105,7 @@ internal static partial class DeviceReader
         Func<HidDevice[], DeviceProfile, Task<Reading>>? query = null)
     {
         var first = target.Interfaces[0];
-        var profile = DeviceCatalog.Find(first.Vendor, first.Product);
+        var profile = target.Interfaces.Select(DeviceCatalog.ProfileFor).FirstOrDefault(p => p is not null);
         var inaccessible = target.Interfaces.Where(d => d.AccessError.HasValue)
             .OrderByDescending(d => d.AccessError == 5).FirstOrDefault();
         var available = target.Interfaces.Where(d => d.AccessError is null).ToArray();
@@ -105,7 +116,9 @@ internal static partial class DeviceReader
                 Connection: target.Connection, ChargingNote: "不向未知型号发送查询命令", Failure: ReadFailure.ProtocolUnsupported);
         try
         {
-            var result = await (query ?? ReadHidCore)(available, profile);
+            var result = query is not null ? await query(available, profile) :
+                profile.Reader is "Logitech" or "LogitechReceiver" ? await LogitechReader.Read(available, profile, target.LogitechSlot ?? 0xff) :
+                await ReadHidCore(available, profile);
             if (result.Percent is null && result.Connected != false && inaccessible is not null)
                 return HidFailure(target, new Win32Exception(inaccessible.AccessError!.Value, "部分 HID 接口无法访问"));
             return result.Connection == "待确认" ? result with { Connection = target.Connection } : result;
@@ -133,6 +146,7 @@ internal static partial class DeviceReader
 
     static async Task<Reading> ReadHidCore(HidDevice[] interfaces, DeviceProfile profile)
     {
+        if (MultiBrandReader.Handles(profile.Reader)) return await MultiBrandReader.Read(interfaces, profile);
         if (profile.Reader == "RazerFeature") return ReadMouse(interfaces, profile);
         if (profile.Reader == "Omni")
         {

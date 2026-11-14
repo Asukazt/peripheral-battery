@@ -12,7 +12,7 @@
     <Product>Peripheral Battery</Product>
     <Title>Peripheral Battery</Title>
     <Description>Peripheral battery levels and mouse DPI</Description>
-    <Version>0.2.0-preview.4</Version>
+    <Version>0.2.0-preview.5</Version>
     <StartupObject>PeriDock.Program</StartupObject>
     <ApplicationIcon>..\assets\peridock.ico</ApplicationIcon>
   </PropertyGroup>

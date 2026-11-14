@@ -111,7 +111,10 @@ internal static class NativeDevices
                     var deviceInfo = new DeviceInfo { Size = (uint)Marshal.SizeOf<DeviceInfo>() };
                     if (!SetupDiGetDeviceInterfaceDetailW(set, ref info, detail, needed, out _, ref deviceInfo)) continue;
                     var path = Marshal.PtrToStringUni(detail + 4) ?? "";
-                    if (!path.Contains($"vid_{vendor:x4}", StringComparison.OrdinalIgnoreCase)) continue;
+                    var vidMatch = Regex.Match(path, @"(?i)vid_([0-9a-f]{4})&pid_");
+                    if (!vidMatch.Success) continue;
+                    var actualVendor = Convert.ToUInt16(vidMatch.Groups[1].Value, 16);
+                    if (vendor == 0 ? !DeviceCatalog.Vendors.Contains(actualVendor) : actualVendor != vendor) continue;
                     var containerKey = new PropertyKey(new Guid("8c7ed206-3f8a-4827-b3ab-ae9e1faefc6c"), 2);
                     var containerBytes = new byte[16];
                     var container = SetupDiGetDevicePropertyW(set, ref deviceInfo, ref containerKey, out var containerType,
@@ -120,19 +123,19 @@ internal static class NativeDevices
                     var nameBytes = new byte[2048];
                     var name = SetupDiGetDeviceRegistryPropertyW(set, ref deviceInfo, 0, out _, nameBytes,
                         (uint)nameBytes.Length, out _) ? Encoding.Unicode.GetString(nameBytes).TrimEnd('\0') : "";
-                    var device = InspectHidInterface(path, vendor, name, container, () =>
+                    var device = InspectHidInterface(path, actualVendor, name, container, () =>
                     {
                         using var handle = Open(path, metadataOnly: true);
                         var attrs = new Attributes { Size = (uint)Marshal.SizeOf<Attributes>() };
                         if (!HidD_GetAttributes(handle, ref attrs)) throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取 HID 标识");
-                        if (attrs.Vendor != vendor) return null;
+                        if (attrs.Vendor != actualVendor) return null;
                         var productName = new StringBuilder(256);
                         HidD_GetProductString(handle, productName, productName.Capacity * 2);
                         if (!HidD_GetPreparsedData(handle, out var pp)) throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取 HID 接口能力");
                         try
                         {
                             return HidP_GetCaps(pp, out var caps) >= 0 ? new HidDevice(path, attrs.Product, caps.UsagePage, caps.Usage,
-                                caps.InputBytes, caps.OutputBytes, caps.FeatureBytes, vendor,
+                                caps.InputBytes, caps.OutputBytes, caps.FeatureBytes, actualVendor,
                                 productName.Length > 0 ? productName.ToString().Trim() : name, container) : null;
                         }
                         finally { HidD_FreePreparsedData(pp); }

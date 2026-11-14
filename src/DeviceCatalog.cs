@@ -5,15 +5,16 @@ using System.Text.Json.Serialization;
 namespace PeriDock;
 
 internal sealed record DeviceProfile(ushort Vendor, ushort Product, string Name, string Kind, string Reader,
-    string Connection = "待确认", byte Transaction = 0x1f, int Scale = 1, int BatteryOffset = 6);
+    string Connection = "待确认", byte Transaction = 0x1f, int Scale = 1, int BatteryOffset = 6, string? MatchName = null);
 
 internal sealed record DeviceTarget(string Id, string Name, string Kind, bool Supported,
-    string? BluetoothId = null, bool LowEnergy = false, string HardwareId = "", string Connection = "待确认")
+    string? BluetoothId = null, bool LowEnergy = false, string HardwareId = "", string Connection = "待确认",
+    byte? LogitechSlot = null, string? ReceiverId = null)
 {
     [JsonIgnore] public HidDevice[] Interfaces { get; init; } = [];
 }
 
-internal static class DeviceCatalog
+internal static partial class DeviceCatalog
 {
     internal static IReadOnlyList<DeviceProfile> Profiles { get; } = Create();
     internal static DeviceProfile? Find(ushort vendor, ushort product)
@@ -31,13 +32,13 @@ internal static class DeviceCatalog
 
     internal static List<DeviceTarget> FromHid(IEnumerable<HidDevice> devices)
     {
-        var candidates = devices.Where(d => d.Vendor is 0x1532 or 0x0b05).Where(d =>
-            d.Vendor == 0x1532 || Find(d.Vendor, d.Product) is not null || IsBranded(d.Name)).ToArray();
+        var candidates = devices.Where(d => Vendors.Contains(d.Vendor)).ToArray();
         return candidates.GroupBy(d => $"{d.Vendor:x4}:{d.Product:x4}:{(d.Container.Length > 0 ? d.Container : d.Path)}")
+            .Where(group => group.Any(d => d.Vendor is 0x1532 or 0x0b05 or 0x046d || ProfileFor(d) is not null || IsBranded(d.Name)))
             .Select(group =>
             {
                 var first = group.First();
-                var profile = Find(first.Vendor, first.Product);
+                var profile = group.Select(ProfileFor).FirstOrDefault(p => p is not null);
                 var name = profile?.Name ?? (first.Name.Length > 0 ? first.Name : $"外设 {first.Vendor:x4}:{first.Product:x4}");
                 return new DeviceTarget("hid-" + Key(group.Key), name, profile?.Kind ?? Kind(name),
                     profile is not null && profile.Reader != "Unsupported", HardwareId: $"{first.Vendor:x4}:{first.Product:x4}",
@@ -46,7 +47,8 @@ internal static class DeviceCatalog
     }
 
     internal static bool IsBranded(string name)
-        => name.Contains("Razer", StringComparison.OrdinalIgnoreCase) || name.Contains("ROG", StringComparison.OrdinalIgnoreCase);
+        => System.Text.RegularExpressions.Regex.IsMatch(name,
+            @"(?i)(?:^|[^a-z0-9])(?:razer|rog|logitech|logi|hyperx|mchose|atk|aula|vgn|vxe)(?:$|[^a-z0-9])|罗技|极度未知|迈从|狼蛛");
     internal static string ModelKey(string name)
         => string.Concat(name.ToLowerInvariant().Where(char.IsLetterOrDigit)).Replace("razer", "").Replace("rog", "");
     internal static string Kind(string name)
@@ -57,7 +59,7 @@ internal static class DeviceCatalog
 
     static IReadOnlyList<DeviceProfile> Create()
     {
-        var list = new List<DeviceProfile>();
+        var list = new List<DeviceProfile>(MultiBrandProfiles());
         void RazerPair(string name, ushort wired, ushort wireless, byte transaction = 0x1f, string kind = "mouse", byte? wiredTransaction = null)
         {
             list.Add(new(0x1532, wired, "Razer " + name, kind, "RazerFeature", "USB", wiredTransaction ?? transaction));

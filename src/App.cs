@@ -21,11 +21,15 @@ internal static class Program
             if (!Elevation.IsElevated || !Elevation.WaitForParent(args[1])) return 1;
             args = [];
         }
-        if (args.Length == 1 && args[0] is "--discover" or "--target-probe")
+        if (args.Length == 1 && args[0] is "--discover" or "--discover-known" or "--target-probe")
         {
             try
             {
-                if (args[0] == "--discover") Console.WriteLine(JsonSerializer.Serialize(DeviceReader.Discover().GetAwaiter().GetResult()));
+                if (args[0] is "--discover" or "--discover-known")
+                {
+                    var known = args[0] == "--discover-known" ? JsonSerializer.Deserialize<DeviceTarget[]>(Console.In.ReadToEnd()) : null;
+                    Console.WriteLine(JsonSerializer.Serialize(DeviceReader.Discover(known).GetAwaiter().GetResult()));
+                }
                 else
                 {
                     var target = JsonSerializer.Deserialize<DeviceTarget>(Console.In.ReadToEnd()) ?? throw new ArgumentException("Missing device");
@@ -157,7 +161,7 @@ internal sealed class Controller
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         if (settings.ShowDock) host.Show();
         refreshTimer.Start(); uiTimer.Start();
-        log.Write("info", "app", "start", Program.AppName + " 0.2.0-preview.4 started");
+        log.Write("info", "app", "start", Program.AppName + " 0.2.0-preview.5 started");
         if (showDetails) ShowDetails();
         else if (showPopover) popover.OpenAt(Anchor(), true);
         _ = Refresh();
@@ -248,7 +252,7 @@ internal sealed class Controller
         var errors = new List<string>();
         try
         {
-            var discovered = await DeviceReader.DiscoverIsolated(stop.Token);
+            var discovered = await DeviceReader.DiscoverIsolated(stop.Token, targets.Values);
             if (Exiting) return;
             foreach (var target in discovered)
             {
@@ -309,7 +313,7 @@ internal sealed class Controller
                 }).ToArray();
             await Task.WhenAll(jobs);
             if (Exiting) return;
-            message = States.Count == 0 ? "未发现 ROG / Razer 外设" : errors.Count > 0 ? "读取异常 · 已记录日志" :
+            message = States.Count == 0 ? "未发现受支持品牌的外设" : errors.Count > 0 ? "读取异常 · 已记录日志" :
                 States.Any(s => s.Failure == ReadFailure.AccessDenied) ?
                     (Elevation.IsElevated ? "管理员权限下仍被拒绝 · 请检查驱动或设备接口" : "访问被拒绝 · 可选择管理员重启") :
                 States.Any(s => !s.LastReadSucceeded) ? "部分设备未响应" :

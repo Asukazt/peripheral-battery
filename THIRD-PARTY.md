@@ -1,6 +1,6 @@
 # Third-party notices
 
-Peripheral Battery 0.2.0-preview.4 is an unofficial Windows peripheral battery utility.
+Peripheral Battery 0.2.0-preview.5 is an unofficial Windows peripheral battery utility.
 Original application code is MIT-licensed; upstream notices remain applicable.
 
 ## Protocol implementations
@@ -11,9 +11,14 @@ Original application code is MIT-licensed; upstream notices remain applicable.
   MIT license: docs/licenses/LICENSE-scythe.txt.
 - Razer mouse/keyboard feature reports, legacy headset protocols and ASUS
   device identifiers are adapted from HeyOkay/HaloBattery,
-  commit 2251f0534a8e886c9692ead42056059b4f69d8c0:
+  commits 2251f0534a8e886c9692ead42056059b4f69d8c0 and
+  73e229cbee2e97fad659fcd96c78afdfa78488fb (six-brand expansion):
   https://github.com/HeyOkay/HaloBattery
   MIT license: docs/licenses/LICENSE-halobattery.txt.
+- Logitech HID++/legacy, HyperX families, MCHOSE, ATK, AULA and VGN/VXE
+  identifiers and battery protocols reference the pinned HaloBattery expansion
+  commit above. G7 filtering follows its spaced-sample calibration. The MIT
+  notice is retained; the research checkout and device diagnostics are excluded.
 - Mouse DPI command reference: OpenRazer, commit
   477f4d6d3ab7e9deb6310d5bd3742560c5cbe80d, driver/razerchromacommon.c and
   driver/razermouse_driver.c. Only the read-only wire command and numeric

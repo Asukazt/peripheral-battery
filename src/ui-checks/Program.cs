@@ -176,6 +176,21 @@ internal static class UiChecks
         }
         AddWindows("-many-test");
         controller.States.Clear();
+        foreach (var (name,kind,source,status) in new (string,string,string,string)[] {
+            ("Logitech MX Keys Advanced Wireless Illuminated Keyboard","keyboard","Logitech HID++","已读取 · 槽位 1"),
+            ("Logitech MX Master 3S","mouse","Logitech HID++","电压估计 · 槽位 2"),
+            ("HyperX Cloud Alpha 2 Wireless","headset","HyperX NGENUITY HID","已读取"),
+            ("MCHOSE M7 / L7 共用接收器","mouse","MCHOSE Realtek HID","已读取"),
+            ("ATK X1 Ultimate Nearlink","mouse","ATK Evision HID","已读取"),
+            ("AULA F87 Pro V2C","keyboard","AULA 键盘 HID","充电状态未知"),
+            ("VGN Dragonfly 4K / VXE R1 Pro Max","mouse","CompX HID","已读取") })
+        {
+            var state=new BatteryState("brand-"+controller.States.Count,name,name,kind);
+            state.Apply(new(60,null,null,null,source,status,Connection:"2.4G",Connected:true),DateTimeOffset.Now);
+            controller.States.Add(state);
+        }
+        AddWindows("-sixbrands-test");
+        controller.States.Clear();
         AddWindows("-empty-test");
         foreach (var (name, window) in windows)
         {
@@ -259,6 +274,7 @@ internal static class UiChecks
         Directory.Delete(appearanceRoot, true);
         foreach (var failure in failures) Console.WriteLine("FAIL " + failure);
         Console.WriteLine(failures.Count == 0 ? "PASS window text bounds and nonblank DPI renders" : $"FAIL {failures.Count} layout checks");
+        Dispatcher.CurrentDispatcher.InvokeShutdown();
         return failures.Count == 0 ? 0 : 1;
     }
 

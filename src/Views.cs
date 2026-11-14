@@ -146,7 +146,7 @@ internal sealed class Popover : Window
             {
                 var row = new DeviceRow(state, true, controller); rows.Add(row); list.Children.Add(row.Root);
             }
-            if (states.Count == 0) list.Children.Add(Text("未发现 ROG / Razer 外设", 14, Muted));
+            if (states.Count == 0) list.Children.Add(Text("未发现受支持品牌的外设", 14, Muted));
         }
         for (var i = 0; i < rows.Count; i++) rows[i].Update(states[i]);
         refresh.IsEnabled = !refreshing;
@@ -263,7 +263,7 @@ internal sealed class DetailWindow : Window
                 if (rows.Count > 0) list.Children.Add(new Border { Height = 1, Background = Line });
                 var row = new DeviceRow(state, false, controller); rows.Add(row); list.Children.Add(row.Root);
             }
-            if (states.Count == 0) list.Children.Add(Text("未发现 ROG / Razer 外设", 16, Muted));
+            if (states.Count == 0) list.Children.Add(Text("未发现受支持品牌的外设", 16, Muted));
         }
         for (var i = 0; i < rows.Count; i++) rows[i].Update(states[i]);
         refresh.IsEnabled = !refreshing;

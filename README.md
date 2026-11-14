@@ -1,12 +1,12 @@
 # Peripheral Battery Preview
 
-Windows ROG / Razer 外设电量组件，0.2.0-preview.4 默认管理员启动与自定义设备图片测试版。
+Windows 多品牌外设电量组件，0.2.0-preview.5 六品牌协议扩展测试版。
 自动发现已连接设备，集中显示电量、连接方式、可读的充电状态与部分雷蛇鼠标 DPI。
 这是扩大协议覆盖范围的测试版，不承诺所有型号、固件或接收器均可读取。
 
 ## 下载与运行
 
-完整解压 `Peripheral-Battery-v0.2.0-preview.4-win-x64.zip` 到新的可写目录，
+完整解压 `Peripheral-Battery-v0.2.0-preview.5-win-x64.zip` 到新的可写目录，
 例如 `D:\PeripheralBatteryPreview`，双击 `PeriDock.exe`，按 Windows 提示确认管理员权限。
 自带 .NET，无需安装 SDK。不要在压缩包内启动，也不要覆盖当前安装。
 
@@ -65,6 +65,15 @@ USB 已枚举不等于读到了电量；2.4G 接收器存在也不代表其无�
 普通权限返回错误 5；此前诊断材料确认管理员权限能够读到电量、充电和 1600 DPI。
 退出雷蛇界面后仍会拒绝访问，因此本项目不把错误 5 直接解释为“雷蛇软件占用”。
 
+## 本版新增六品牌协议
+
+新增 Logitech、HyperX、MCHOSE、ATK、AULA、VGN/VXE 协议入口和品牌蓝牙识别，
+覆盖 85 个新增 VID/PID 条目（81 个启用协议，4 个明确待适配）。
+罗技接收器按配对槽位区分，共享 OEM ID 同时校验产品名称，不向无依据的变体盲发命令。
+详细系列、例外、协议依据与验证边界见 [六品牌兼容说明](docs/MULTIBRAND-COMPATIBILITY.md)。
+**六个新品牌未在本机实机验证，不宣称全型号通杀。**
+新品牌使用通用图标或自定义图片，未新增官网素材映射。
+
 ## 兼容范围
 
 精确 VID/PID 清单见 [docs/device-catalog.json](docs/device-catalog.json)。
@@ -79,7 +88,7 @@ USB 已枚举不等于读到了电量；2.4G 接收器存在也不代表其无�
 | ROG 键盘 | Azoth/X/Extreme/SE、Falchion/RX、Claymore II、部分 Strix Scope | OMNI 仅保留已验证过的 Azoth X 路由 |
 | ROG / ASUS 鼠标 | Gladius III、Chakram/X、Keris Wireless、Harpe Ace Aim Lab、Spatha X、Pugio II、部分 Strix/TUF/TX | 部分旧型号仅提供 25% 档位估计；新 OMNI 型号未全面接入 |
 | ROG 耳机 | Delta II/KJP、Pelta、Cetra SpeedNova | Cetra 显示左右耳较低电量，充电盒信息放在状态提示中 |
-| 蓝牙 | 名称含 ROG / Razer 的已连接设备 | 优先标准 Battery Service；不提供服务的设备不能保证有电量 |
+| 蓝牙 | ROG / Razer / Logitech / HyperX / MCHOSE / ATK / AULA / VGN/VXE 品牌的已连接设备 | 优先标准 Battery Service；不提供服务的设备不能保证有电量 |
 
 此前本机已读到：Viper V3 Pro 2.4G 电量和 1600 DPI、Azoth X 蓝牙电量。
 既有版本曾验证上述鼠标、BlackShark V3 Pro 同时有线读取，以及 Azoth X USB 电量。
