@@ -83,6 +83,7 @@ internal static class UiChecks
             if (Products()[1].Source is BitmapImage) failures.Add("generic image choice did not clear the photo");
         }
         var appearanceRoot = Path.Combine(Path.GetTempPath(), "PeriDock-appearance-" + Guid.NewGuid().ToString("N"));
+        var imageService = new OfficialProductImages(appearanceRoot, new Diagnostics(appearanceRoot));
         var white = new ProductImageOption("white", "白色", Path.Combine(AppContext.BaseDirectory, "assets", "peridock.png"));
         if (args.Length > 2)
         {
@@ -97,7 +98,7 @@ internal static class UiChecks
                 new("auto", "自动", null), white, new("generic", "通用图标", null)]), value =>
             {
                 new UserSettings(true, new() { ["test"] = value.Id }).Save(appearanceRoot); return true;
-            });
+            }, file => imageService.ImportAsync("Razer Basilisk V3 Pro", file));
         appearance.Show(); appearance.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
         var whiteButton = Descendants((FrameworkElement)appearance.Content).OfType<Button>().Single(b =>
             System.Windows.Automation.AutomationProperties.GetName(b) == "选择白色");
@@ -105,8 +106,40 @@ internal static class UiChecks
         if (UserSettings.Load(appearanceRoot, new Diagnostics(appearanceRoot)).ImageChoices?["test"] != white.Id ||
             !Descendants((FrameworkElement)appearance.Content).OfType<TextBlock>().Any(t => t.Text.Contains("已选择：白色，已保存")))
             failures.Add("appearance selection did not save and confirm white");
-        appearance.Hide(); Directory.Delete(appearanceRoot, true);
+        appearance.Hide();
         windows.Add(("PeriDock-appearance-white", appearance));
+        var pending = new System.Threading.Tasks.TaskCompletionSource<IReadOnlyList<ProductImageOption>>();
+        var custom = new AppearanceWindow(new("custom", "Unknown model", "Custom", "mouse"), "auto",
+            () => pending.Task, value =>
+            {
+                new UserSettings(true, new() { ["test"] = value.Id }).Save(appearanceRoot); return true;
+            }, file => imageService.ImportAsync("Unknown model", file));
+        custom.Show(); custom.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        if (!Descendants((FrameworkElement)custom.Content).OfType<Button>().Any(b =>
+            System.Windows.Automation.AutomationProperties.GetName(b) == "导入自定义图片…")) failures.Add("custom import entry missing while official images are loading");
+        void Await(System.Threading.Tasks.Task task)
+        {
+            while (!task.IsCompleted) custom.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            task.GetAwaiter().GetResult();
+        }
+        var sourceFile = Path.Combine(AppContext.BaseDirectory, "assets", "peridock.png");
+        Await(custom.ImportFile(sourceFile));
+        pending.SetResult([new("auto", "自动", null), new("generic", "通用图标", null)]);
+        custom.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        if (UserSettings.Load(appearanceRoot, new Diagnostics(appearanceRoot)).ImageChoices?["test"] != "custom" ||
+            !Descendants((FrameworkElement)custom.Content).OfType<TextBlock>().Any(t => t.Text == "已选择：自定义图片，已保存。"))
+            failures.Add("custom import was lost when official image loading finished");
+        var customFile = OfficialProductImages.CustomPath(appearanceRoot, "Unknown model");
+        var customState = new BatteryState("custom", "Unknown model", "Custom", "mouse") { ProductImagePath = customFile };
+        var previewImage = Visuals.Product(customState, 80, 80); var originalSource = previewImage.Source;
+        Await(custom.ImportFile(Path.Combine(AppContext.BaseDirectory, "assets", "mouse-display.png")));
+        File.SetLastWriteTimeUtc(customFile, DateTime.UtcNow.AddSeconds(1));
+        Visuals.UpdateProduct(previewImage, customState);
+        if (ReferenceEquals(originalSource, previewImage.Source)) failures.Add("replacement custom image stayed stale in image cache");
+        Await(custom.ImportFile(Path.Combine(appearanceRoot, "missing.png")));
+        if (UserSettings.Load(appearanceRoot, new Diagnostics(appearanceRoot)).ImageChoices?["test"] != "custom" ||
+            !Descendants((FrameworkElement)custom.Content).OfType<TextBlock>().Any(t => t.Text.StartsWith("导入失败"))) failures.Add("failed import cleared the previous choice or lacked feedback");
+        custom.Hide(); windows.Add(("PeriDock-appearance-custom", custom));
         controller.States[0].Apply(new Reading(40, true, null, null, "ROG HID", "已连接",
             Connection: "蓝牙", Connected: true), DateTimeOffset.Now);
         controller.States[1].Apply(new Reading(50, false, 1600, 1600, "Razer HID", "已连接",
@@ -223,6 +256,7 @@ internal static class UiChecks
             }
             Console.WriteLine($"{name}: rendered at 100%, 150%, 200%");
         }
+        Directory.Delete(appearanceRoot, true);
         foreach (var failure in failures) Console.WriteLine("FAIL " + failure);
         Console.WriteLine(failures.Count == 0 ? "PASS window text bounds and nonblank DPI renders" : $"FAIL {failures.Count} layout checks");
         return failures.Count == 0 ? 0 : 1;

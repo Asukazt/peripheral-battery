@@ -31,6 +31,33 @@ internal sealed class OfficialProductImages(string root, Diagnostics log, HttpCl
     internal static string FileKey(string name) => DeviceCatalog.Key(ModelKey(name));
     internal static string OverridePath(string root, string name)
         => Path.Combine(root, "data", "device-images", "overrides", FileKey(name) + ".png");
+    internal static string CustomPath(string root, string name)
+        => Path.Combine(root, "data", "device-images", "custom", FileKey(name) + ".png");
+    internal async Task<ProductImageOption> ImportAsync(string name, string source, CancellationToken cancellation = default)
+    {
+        if (Path.GetExtension(source).ToLowerInvariant() is not (".png" or ".jpg" or ".jpeg" or ".bmp" or ".ico"))
+            throw new InvalidDataException("请选择 PNG、JPG、BMP 或 ICO 图片。");
+        byte[] bytes;
+        using (var input = File.OpenRead(source))
+        {
+            if (input.Length is <= 0 or > 10 * 1024 * 1024) throw new InvalidDataException("图片大小应在 10 MB 以内。");
+            bytes = new byte[(int)input.Length];
+            await input.ReadExactlyAsync(bytes, cancellation);
+        }
+        var png = await Task.Run(() => NormalizeImage(bytes), cancellation);
+        var file = CustomPath(root, name);
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        var temp = file + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllBytesAsync(temp, png, cancellation);
+            cancellation.ThrowIfCancellationRequested();
+            File.Move(temp, file, true);
+        }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
+        optionRequests.Remove(FileKey(name));
+        return new("custom", "自定义图片", file);
+    }
     static bool Allowed(Uri uri, Uri page, bool image)
     {
         if (uri.Scheme != "https" || !uri.IsDefaultPort || uri.UserInfo.Length > 0) return false;
@@ -199,6 +226,8 @@ internal sealed class OfficialProductImages(string root, Diagnostics log, HttpCl
         var choices = new List<ProductImageOption> { new("auto", "自动", await automatic.ConfigureAwait(false)) };
         var local = OverridePath(root, name);
         if (File.Exists(local) && await Task.Run(() => ValidImage(local), cancellation).ConfigureAwait(false)) choices.Add(new("local", "本地图片", local));
+        var custom = CustomPath(root, name);
+        if (File.Exists(custom) && await Task.Run(() => ValidImage(custom), cancellation).ConfigureAwait(false)) choices.Add(new("custom", "自定义图片", custom));
         try
         {
             var page = PageFor(name);

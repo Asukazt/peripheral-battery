@@ -741,6 +741,94 @@ Check("color preferences persist without resetting dock visibility", () =>
     }
     finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
 });
+Check("custom picture import is available without replacing the existing personal override", () =>
+{
+    var root = ImageTestRoot();
+    try
+    {
+        var existing = OfficialProductImages.OverridePath(root, "Razer Viper V3 Pro");
+        Directory.CreateDirectory(Path.GetDirectoryName(existing)!); File.WriteAllBytes(existing, imageFixture);
+        using var handler = new ImageHttpHandler(_ => throw new HttpRequestException("offline"));
+        using var client = new HttpClient(handler);
+        var images = new OfficialProductImages(root, new Diagnostics(root), client);
+        Equal(false, images.GetOptionsAsync("Razer Viper V3 Pro").GetAwaiter().GetResult().Any(v => v.Id == "custom"));
+        var source = Path.Combine(root, "chosen.png"); File.WriteAllBytes(source, imageFixture);
+        var imported = images.ImportAsync("Razer Viper V3 Pro", source).GetAwaiter().GetResult();
+        Equal("custom", imported.Id); Equal("自定义图片", imported.Label);
+        Equal(false, existing == imported.FilePath);
+        Equal(true, File.ReadAllBytes(existing).SequenceEqual(imageFixture));
+        var normalized = File.ReadAllBytes(imported.FilePath!); File.Delete(source);
+        Equal(true, normalized.Length > 0);
+        Equal(true, images.GetOptionsAsync("Razer Viper V3 Pro (USB)").GetAwaiter().GetResult().Any(v => v == imported));
+        new UserSettings(true, new() { [OfficialProductImages.FileKey("Razer Viper V3 Pro")] = imported.Id }).Save(root);
+        var restarted = new OfficialProductImages(root, new Diagnostics(root), client);
+        var restored = restarted.GetOptionsAsync("Razer Viper V3 Pro (BT)").GetAwaiter().GetResult().Single(v => v.Id == "custom");
+        Equal(imported.FilePath, restored.FilePath); Equal(true, File.ReadAllBytes(restored.FilePath!).SequenceEqual(normalized));
+        Equal(false, restarted.GetOptionsAsync("Unknown custom mouse").GetAwaiter().GetResult().Any(v => v.Id == "custom"));
+        Equal("custom", UserSettings.Load(root, new Diagnostics(root)).ImageChoices![OfficialProductImages.FileKey("Razer Viper V3 Pro")]);
+        Equal(true, UserSettings.Load(root, new Diagnostics(root)).ShowDock);
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+});
+Check("invalid or cancelled custom imports preserve the saved image and leave no temporary files", () =>
+{
+    var root = ImageTestRoot();
+    try
+    {
+        Directory.CreateDirectory(root);
+        var images = new OfficialProductImages(root, new Diagnostics(root));
+        var source = Path.Combine(root, "chosen.png"); File.WriteAllBytes(source, imageFixture);
+        var imported = images.ImportAsync("Unknown model", source).GetAwaiter().GetResult();
+        var good = File.ReadAllBytes(imported.FilePath!);
+        Equal(true, good.Take(8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }));
+        foreach (var invalid in new[] { "corrupt.png", "too-big.png", "active.svg", "missing.png" })
+        {
+            var file = Path.Combine(root, invalid);
+            if (invalid != "missing.png") File.WriteAllBytes(file, invalid == "too-big.png" ? new byte[10 * 1024 * 1024 + 1] : [1, 2, 3]);
+            var rejected = false;
+            try { images.ImportAsync("Unknown model", file).GetAwaiter().GetResult(); }
+            catch { rejected = true; }
+            Equal(true, rejected); Equal(true, File.ReadAllBytes(imported.FilePath!).SequenceEqual(good));
+        }
+        using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+        var stopped = false;
+        try { images.ImportAsync("Unknown model", source, cancelled.Token).GetAwaiter().GetResult(); }
+        catch (OperationCanceledException) { stopped = true; }
+        Equal(true, stopped); Equal(true, File.ReadAllBytes(imported.FilePath!).SequenceEqual(good));
+        Equal(0, Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories).Length);
+        File.WriteAllBytes(source, File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "assets", "mouse-display.png")));
+        Equal(imported.FilePath, images.ImportAsync("Unknown model", source).GetAwaiter().GetResult().FilePath);
+        Equal(false, File.ReadAllBytes(imported.FilePath!).SequenceEqual(good));
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+});
+Check("custom imports accept real JPEG BMP and ICO files and normalize each to PNG", () =>
+{
+    var root = ImageTestRoot();
+    try
+    {
+        Directory.CreateDirectory(root);
+        var images = new OfficialProductImages(root, new Diagnostics(root));
+        using var input = new MemoryStream(imageFixture);
+        var frame = System.Windows.Media.Imaging.BitmapFrame.Create(input);
+        foreach (var extension in new[] { ".jpg", ".bmp", ".ico" })
+        {
+            var source = Path.Combine(root, "chosen" + extension);
+            if (extension == ".ico") File.Copy(Path.Combine(AppContext.BaseDirectory, "assets", "peridock.ico"), source);
+            else
+            {
+                System.Windows.Media.Imaging.BitmapEncoder encoder = extension == ".jpg"
+                    ? new System.Windows.Media.Imaging.JpegBitmapEncoder() : new System.Windows.Media.Imaging.BmpBitmapEncoder();
+                encoder.Frames.Add(frame); using var file = File.Create(source); encoder.Save(file);
+            }
+            var original = File.ReadAllBytes(source);
+            var choice = images.ImportAsync("Unknown model", source).GetAwaiter().GetResult();
+            Equal(true, File.ReadAllBytes(choice.FilePath!).Take(8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }));
+            Equal(true, File.ReadAllBytes(source).SequenceEqual(original));
+        }
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+});
 if (args.Length == 2 && args[0] == "--official-images")
 {
     foreach (var name in new[] { "Razer Basilisk V3 Pro", "Razer DeathStalker V2 Pro", "ROG Harpe Ace Aim Lab Edition", "ROG Azoth X", "ROG Pelta" })

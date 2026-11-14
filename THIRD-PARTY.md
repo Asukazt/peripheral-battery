@@ -1,6 +1,6 @@
 # Third-party notices
 
-Peripheral Battery 0.2.0-preview.3 is an unofficial Windows peripheral battery utility.
+Peripheral Battery 0.2.0-preview.4 is an unofficial Windows peripheral battery utility.
 Original application code is MIT-licensed; upstream notices remain applicable.
 
 ## Protocol implementations

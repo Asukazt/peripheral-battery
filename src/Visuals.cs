@@ -68,7 +68,7 @@ internal static class Visuals
         return frame;
     }
 
-    static readonly Dictionary<string, ImageSource> ProductSources = [];
+    static readonly Dictionary<string, (long Stamp, ImageSource Source)> ProductSources = [];
     internal static Image Product(BatteryState state, double width, double height)
     {
         var image = new Image
@@ -82,22 +82,27 @@ internal static class Visuals
     internal static void UpdateProduct(Image image, BatteryState state)
     {
         var key = state.ProductImagePath ?? "kind:" + state.Kind;
-        if (!ProductSources.TryGetValue(key, out var source))
+        long stamp = 0;
+        try { if (state.ProductImagePath is { } path) stamp = File.GetLastWriteTimeUtc(path).Ticks; }
+        catch { }
+        if (!ProductSources.TryGetValue(key, out var cached) || cached.Stamp != stamp)
         {
+            ImageSource? source = null;
             if (state.ProductImagePath is { } file)
             {
                 try
                 {
                     var bitmap = new BitmapImage(); bitmap.BeginInit();
                     bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.UriSource = new Uri(file);
+                    bitmap.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
                     bitmap.DecodePixelWidth = 512; bitmap.EndInit(); bitmap.Freeze(); source = bitmap;
                 }
                 catch { source = null; }
             }
             source ??= IconSource(state.Kind switch { "mouse" => "mouse", "keyboard" => "keyboard", "headset" => "headphones", _ => "battery-full" }, Muted);
-            ProductSources[key] = source;
+            cached = (stamp, source); ProductSources[key] = cached;
         }
-        image.Source = source;
+        image.Source = cached.Source;
         System.Windows.Automation.AutomationProperties.SetName(image, state.Name + " 产品图");
     }
     internal static Button ProductChoice(BatteryState state, Image image, Action choose)

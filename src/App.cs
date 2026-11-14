@@ -157,7 +157,7 @@ internal sealed class Controller
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         if (settings.ShowDock) host.Show();
         refreshTimer.Start(); uiTimer.Start();
-        log.Write("info", "app", "start", Program.AppName + " 0.2.0-preview.3 started");
+        log.Write("info", "app", "start", Program.AppName + " 0.2.0-preview.4 started");
         if (showDetails) ShowDetails();
         else if (showPopover) popover.OpenAt(Anchor(), true);
         _ = Refresh();
@@ -332,7 +332,9 @@ internal sealed class Controller
         var selected = settings.ImageChoices?.GetValueOrDefault(OfficialProductImages.FileKey(state.Name)) ?? "auto";
         try
         {
-            var file = selected == "auto" ? await productImages.GetAsync(state.Name, stop.Token) : selected == "generic" ? null :
+            var custom = OfficialProductImages.CustomPath(root, state.Name);
+            var file = selected == "custom" && File.Exists(custom) ? custom :
+                selected == "auto" ? await productImages.GetAsync(state.Name, stop.Token) : selected == "generic" ? null :
                 (await productImages.GetOptionsAsync(state.Name, stop.Token)).FirstOrDefault(o => o.Id == selected)?.FilePath ??
                     await productImages.GetAsync(state.Name, stop.Token);
             if (!Exiting && file is not null && state.ProductImagePath != file &&
@@ -359,7 +361,7 @@ internal sealed class Controller
                     UpdateViews(); return true;
                 }
                 catch (Exception ex) { SettingsError("save-image-choice", ex); return false; }
-            });
+            }, file => productImages.ImportAsync(state.Name, file, stop.Token));
         window.Show();
     }
     void UpdateViews()

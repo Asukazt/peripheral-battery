@@ -1,12 +1,12 @@
 # Peripheral Battery Preview
 
-Windows ROG / Razer 外设电量组件，0.2.0-preview.3 官网产品图片与配色测试版。
+Windows ROG / Razer 外设电量组件，0.2.0-preview.4 自定义设备图片测试版。
 自动发现已连接设备，集中显示电量、连接方式、可读的充电状态与部分雷蛇鼠标 DPI。
 这是扩大协议覆盖范围的测试版，不承诺所有型号、固件或接收器均可读取。
 
 ## 下载与运行
 
-完整解压 `Peripheral-Battery-v0.2.0-preview.3-win-x64.zip` 到新的可写目录，
+完整解压 `Peripheral-Battery-v0.2.0-preview.4-win-x64.zip` 到新的可写目录，
 例如 `D:\PeripheralBatteryPreview`，双击 `PeriDock.exe`。
 自带 .NET，无需安装 SDK。不要在压缩包内启动，也不要覆盖当前安装。
 
@@ -29,6 +29,12 @@ Windows ROG / Razer 外设电量组件，0.2.0-preview.3 官网产品图片与�
 也可以选择“自动”或“通用图标”。此功能只改变软件显示，不修改设备颜色、灯光或固件。
 官网没有分色素材时，可能只有“官方外观”，或自动图片包含多个颜色。
 
+窗口中的 **“导入自定义图片…”** 可从本机选择 PNG、JPG、BMP 或 ICO（最大 10 MB）。
+图片经过解码验证、缩放并转为 PNG，复制到 `data/device-images/custom/`；导入后立即选中并保存，
+重启后继续使用，不依赖原文件位置，也不等待官网联网。可再次导入替换，或切回官网配色、
+“自动”“本地图片”“通用图标”。同型号共用自定义图片，未知型号也可导入。
+取消文件选择或导入失败时保留原图；不会覆盖原有 overrides 中的个人图片，也不会上传所选文件。
+
 已有个人图片可放在 `data/device-images/overrides/<型号键>.png`，自动模式会优先使用；
 型号键为 `SHA256(归一化型号)` 前 24 位十六进制，具体算法见 `OfficialProductImages.FileKey`。
 个人图片按型号隔离，不会发给其他用户。公开包仅含通用图标，不包含个人图片或官网图片缓存。
@@ -36,7 +42,7 @@ Windows ROG / Razer 外设电量组件，0.2.0-preview.3 官网产品图片与�
 程序只请求内置映射中的官网 HTTPS 地址和受限的官方图片域名，不将未知设备名称、
 设备路径、序列号、日志或诊断数据发送给图片服务；官网仍会收到普通网络请求信息。
 映射包含 70 个型号入口，不能理解为 70 款取图均已验证，更不代表电量协议全部适配。
-本轮联网验证了 Basilisk V3 Pro、DeathStalker V2 Pro、Harpe Ace Aim Lab Edition、
+preview.3 联网验证了 Basilisk V3 Pro、DeathStalker V2 Pro、Harpe Ace Aim Lab Edition、
 Azoth X、Pelta 五款取图，以及 Basilisk 黑/白、Harpe 月光白选色和断网缓存恢复。
 
 ## USB 访问被拒绝与可选提权
