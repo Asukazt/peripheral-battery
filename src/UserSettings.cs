@@ -5,7 +5,7 @@ using Microsoft.Win32;
 
 namespace PeriDock;
 
-internal sealed record UserSettings(bool ShowDock = false)
+internal sealed record UserSettings(bool ShowDock = false, Dictionary<string, string>? ImageChoices = null)
 {
     internal static UserSettings Load(string root, Diagnostics log)
     {

@@ -4,6 +4,8 @@ using System.Text.Json;
 using Microsoft.Win32;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Http;
 
 var failures = new List<string>();
 var checks = 0;
@@ -553,6 +555,218 @@ Check("elevation is explicit, uses the current executable and treats UAC cancell
     Equal(false, Elevation.WaitForParent("-1"));
     Equal(false, Elevation.WaitForParent(Environment.ProcessId.ToString()));
 });
+Check("official images match model and transport suffix without sending unknown names", () =>
+{
+    Equal("https://www.razer.com/gaming-mice/razer-viper-v3-pro",
+        OfficialProductImages.PageFor("Razer Viper V3 Pro (BT)")?.AbsoluteUri);
+    Equal("https://rog.asus.com/keyboards/keyboards/aura-rgb/rog-azoth-x/",
+        OfficialProductImages.PageFor("ROG AZOTH X")?.AbsoluteUri);
+    Equal<Uri?>(null, OfficialProductImages.PageFor("Razer Alice's custom mouse 123456"));
+    Equal<Uri?>(null, OfficialProductImages.PageFor("Razer Viper V3 Pro 35K unknown variant"));
+});
+Check("official image parser validates model, host and metadata attribute order", () =>
+{
+    var page = new Uri("https://www.razer.com/gaming-mice/razer-basilisk-v3-pro");
+    var html = "<meta content='Razer Basilisk V3 Pro | Razer' property='og:title'>" +
+        "<meta content='https://assets2.razerzone.com/product.jpg?w=512&amp;h=512' property='og:image'>";
+    Equal("https://assets2.razerzone.com/product.jpg?w=512&h=512",
+        OfficialProductImages.ImageFromPage(page, html)?.AbsoluteUri);
+    Equal<Uri?>(null, OfficialProductImages.ImageFromPage(page, html.Replace("Basilisk V3 Pro", "Basilisk V3")));
+    Equal<Uri?>(null, OfficialProductImages.ImageFromPage(page, html.Replace("assets2.razerzone.com", "assets2.razerzone.com.evil.example")));
+    Equal<Uri?>(null, OfficialProductImages.ImageFromPage(page, html.Replace("https://assets2", "http://assets2")));
+    Equal<Uri?>(null, OfficialProductImages.ImageFromPage(page, html.Replace("assets2.razerzone.com", "127.0.0.1")));
+    Equal<Uri?>(null, OfficialProductImages.ImageFromPage(new Uri("https://evil.example/razer-basilisk-v3-pro"), html));
+});
+string ImageTestRoot() => Path.Combine(Path.GetTempPath(), "PeriDock-images-" + Guid.NewGuid().ToString("N"));
+HttpResponseMessage ImageResponse(string text) => new(HttpStatusCode.OK) { Content = new StringContent(text, System.Text.Encoding.UTF8, "text/html") };
+var officialHtml = "<meta property='og:title' content='Razer Basilisk V3 Pro'>" +
+    "<meta property='og:image' content='https://assets2.razerzone.com/product.png'>";
+var imageFixture = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "assets", "peridock.png"));
+Check("product images download once per model, retain source and work offline", () =>
+{
+    var root = ImageTestRoot();
+    try
+    {
+        using var handler = new ImageHttpHandler(request =>
+        {
+            if (request.RequestUri!.Host == "www.razer.com") return ImageResponse(officialHtml);
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(imageFixture) };
+            response.Content.Headers.ContentType = new("image/png"); return response;
+        });
+        using var client = new HttpClient(handler);
+        var images = new OfficialProductImages(root, new Diagnostics(root), client);
+        var first = images.GetAsync("Razer Basilisk V3 Pro");
+        Equal(true, ReferenceEquals(first, images.GetAsync("Razer Basilisk V3 Pro (BT)")));
+        var path = first.GetAwaiter().GetResult();
+        Equal(true, path is not null && File.Exists(path)); Equal(2, handler.Seen.Count);
+        Equal(true, File.ReadAllText(path + ".source.json").Contains("https://assets2.razerzone.com/product.png"));
+        using var offlineHandler = new ImageHttpHandler(_ => throw new HttpRequestException("offline"));
+        using var offline = new HttpClient(offlineHandler);
+        Equal(path, new OfficialProductImages(root, new Diagnostics(root), offline).GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
+        Equal(0, offlineHandler.Seen.Count);
+        File.WriteAllText(path!, "corrupt cache");
+        Equal(path, new OfficialProductImages(root, new Diagnostics(root), client).GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
+        Equal(4, handler.Seen.Count);
+        Equal(0, Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories).Length);
+        var state = new BatteryState("test", "test", "test") { ProductImagePath = path };
+        Equal(false, JsonSerializer.Serialize(state).Contains(path!));
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+});
+Check("per-model local pictures win without leaking one mouse image to other models", () =>
+{
+    var root = ImageTestRoot();
+    try
+    {
+        var path = OfficialProductImages.OverridePath(root, "Razer Viper V3 Pro");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!); File.WriteAllBytes(path, imageFixture);
+        using var handler = new ImageHttpHandler(_ => throw new HttpRequestException("offline"));
+        using var client = new HttpClient(handler);
+        var images = new OfficialProductImages(root, new Diagnostics(root), client);
+        Equal(path, images.GetAsync("Razer Viper V3 Pro (BT)").GetAwaiter().GetResult()); Equal(0, handler.Seen.Count);
+        Equal<string?>(null, images.GetAsync("Razer Alice's private mouse").GetAwaiter().GetResult()); Equal(0, handler.Seen.Count);
+        Equal<string?>(null, images.GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult()); Equal(2, handler.Seen.Count);
+        Equal(true, File.ReadAllBytes(path).SequenceEqual(imageFixture));
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+});
+Check("failed image fetches back off across restarts and retry after a day", () =>
+{
+    var root = ImageTestRoot();
+    try
+    {
+        using var handler = new ImageHttpHandler(_ => new(HttpStatusCode.NotFound));
+        using var client = new HttpClient(handler);
+        var images = new OfficialProductImages(root, new Diagnostics(root), client);
+        Equal<string?>(null, images.GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
+        Equal<string?>(null, images.GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
+        Equal<string?>(null, new OfficialProductImages(root, new Diagnostics(root), client).GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
+        Equal(2, handler.Seen.Count);
+        var retry = Directory.GetFiles(root, "*.retry", SearchOption.AllDirectories).Single();
+        File.SetLastWriteTimeUtc(retry, DateTime.UtcNow.AddHours(-25));
+        Equal<string?>(null, new OfficialProductImages(root, new Diagnostics(root), client).GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
+        Equal(4, handler.Seen.Count);
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+});
+Check("official image redirects never leave the vendor or change product model", () =>
+{
+    foreach (var location in new[] { "https://127.0.0.1/product.png", "https://www.razer.com/gaming-mice/razer-basilisk-v3-pro-35k" })
+    {
+        var root = ImageTestRoot();
+        try
+        {
+            using var handler = new ImageHttpHandler(_ =>
+            {
+                var response = new HttpResponseMessage(HttpStatusCode.Found); response.Headers.Location = new Uri(location); return response;
+            });
+            using var client = new HttpClient(handler);
+            Equal<string?>(null, new OfficialProductImages(root, new Diagnostics(root), client).GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
+            Equal(2, handler.Seen.Count);
+            Equal(true, handler.Seen.All(uri => uri.Host == "www.razer.com" &&
+                uri.AbsolutePath is "/gaming-mice/razer-basilisk-v3-pro/buy" or "/gaming-mice/razer-basilisk-v3-pro"));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+});
+Check("invalid, oversized and active image content all fall back safely", () =>
+{
+    foreach (var type in new[] { "image/svg+xml", "image/png", "oversized" })
+    {
+        var root = ImageTestRoot();
+        try
+        {
+            using var handler = new ImageHttpHandler(request =>
+            {
+                if (request.RequestUri!.Host == "www.razer.com") return ImageResponse(officialHtml);
+                var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(type == "oversized" ? new byte[6 * 1024 * 1024] : [1, 2, 3]) };
+                response.Content.Headers.ContentType = new(type == "oversized" ? "image/png" : type); return response;
+            });
+            using var client = new HttpClient(handler);
+            Equal<string?>(null, new OfficialProductImages(root, new Diagnostics(root), client).GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
+            Equal(0, Directory.GetFiles(root, "*.png", SearchOption.AllDirectories).Length);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+});
+Check("tray tooltip shows device category and percentage rather than model names", () =>
+{
+    var mouse = new BatteryState("test", "Razer Viper V3 Pro", "Viper", "mouse");
+    mouse.Apply(new(10, false, 1600, 1600, "HID", "已连接", Connected: true), DateTimeOffset.UtcNow);
+    Equal("鼠标：10%", mouse.TrayText);
+    mouse.Apply(new(null, null, null, null, "HID", "访问被拒绝", Failure: ReadFailure.AccessDenied), DateTimeOffset.UtcNow);
+    Equal("鼠标：--", mouse.TrayText);
+    Equal("键盘：--", new BatteryState("kb", "ROG AZOTH X", "Azoth", "keyboard").TrayText);
+    Equal("耳机：--", new BatteryState("hs", "Razer", "Razer", "headset").TrayText);
+});
+Check("Razer official color options are model specific and reject foreign image hosts", () =>
+{
+    var page = OfficialProductImages.PageFor("Razer Basilisk V3 Pro")!;
+    var options = new[] { ("Black", "Razer Basilisk V3 Pro", "assets3.razerzone.com"),
+        ("White", "Razer Basilisk V3 Pro", "assets3.razerzone.com"),
+        ("Black", "Razer Basilisk V3 Pro 35K", "assets3.razerzone.com"),
+        ("Pink", "Razer Basilisk V3 Pro", "evil.example") }.Select(v => new {
+            name = v.Item2 + " - " + v.Item1,
+            images = new[] { new { format = "product", url = "https://" + v.Item3 + "/" + v.Item1 + ".png" } },
+            variantOptionQualifiers = new[] { new { qualifier = "color", value = v.Item1 } }
+        });
+    var html = "<script id='ng-state' type='application/json'>" + JsonSerializer.Serialize(new {
+        nested = new { baseOptions = new[] { new { options } } }
+    }) + "</script>";
+    var values = OfficialProductImages.VariantsFromPage(page, html);
+    Equal(2, values.Count); Equal("黑色", values[0].Label); Equal("白色", values[1].Label);
+    Equal(false, values[0].Id == values[1].Id);
+});
+Check("ROG gallery color options ignore related models and mixed-color hero images", () =>
+{
+    var page = OfficialProductImages.PageFor("ROG Harpe Ace Aim Lab Edition")!;
+    var html = "<img alt='ROG Harpe Ace Aim Lab Edition in black and white' src='https://dlcdnwebimgs.asus.com/hero'>" +
+        "<img alt='ROG Harpe Ace Aim Lab Edition Black front' src='https://dlcdnwebimgs.asus.com/black'>" +
+        "<img alt='ROG Harpe Ace Aim Lab Edition Moonlight White front' src='https://dlcdnwebimgs.asus.com/white'>" +
+        "<img alt='ROG Chakram X White' src='https://dlcdnwebimgs.asus.com/other'>";
+    var values = OfficialProductImages.VariantsFromPage(page, html);
+    Equal(2, values.Count); Equal("黑色", values[0].Label); Equal("月光白", values[1].Label);
+});
+Check("color preferences persist without resetting dock visibility", () =>
+{
+    var root = ImageTestRoot();
+    try
+    {
+        var key = OfficialProductImages.FileKey("Razer Viper V3 Pro");
+        var settings = new UserSettings(true, new() { [key] = "generic" }); settings.Save(root);
+        var loaded = UserSettings.Load(root, new Diagnostics(root));
+        Equal(true, loaded.ShowDock); Equal("generic", loaded.ImageChoices![key]);
+        (loaded with { ShowDock = false }).Save(root);
+        Equal("generic", UserSettings.Load(root, new Diagnostics(root)).ImageChoices![key]);
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+});
+if (args.Length == 2 && args[0] == "--official-images")
+{
+    foreach (var name in new[] { "Razer Basilisk V3 Pro", "Razer DeathStalker V2 Pro", "ROG Harpe Ace Aim Lab Edition", "ROG Azoth X", "ROG Pelta" })
+        Check("live official product image: " + name, () =>
+        {
+            var images = new OfficialProductImages(args[1], new Diagnostics(args[1]));
+            var file = images.GetAsync(name).GetAwaiter().GetResult();
+            Equal(true, file is not null && File.Exists(file) && File.Exists(file + ".source.json"));
+            Console.WriteLine("IMAGE " + name + " => " + file);
+        });
+    foreach (var name in new[] { "Razer Basilisk V3 Pro", "ROG Harpe Ace Aim Lab Edition" })
+        Check("live official color selection and offline restore: " + name, () =>
+        {
+            var values = new OfficialProductImages(args[1], new Diagnostics(args[1])).GetOptionsAsync(name).GetAwaiter().GetResult();
+            var colors = values.Where(v => v.Id is not ("auto" or "local" or "generic")).ToArray();
+            Equal(true, colors.Length >= 2);
+            Equal(true, colors.Any(v => v.Label.Contains("白")));
+            var metadata = Path.Combine(args[1], "data", "device-images", OfficialProductImages.FileKey(name) + ".options.json");
+            File.SetLastWriteTimeUtc(metadata, DateTime.UtcNow.AddDays(-8));
+            using var handler = new ImageHttpHandler(_ => throw new HttpRequestException("offline"));
+            using var offline = new HttpClient(handler);
+            var restored = new OfficialProductImages(args[1], new Diagnostics(args[1]), offline).GetOptionsAsync(name).GetAwaiter().GetResult();
+            Equal(true, colors.All(c => restored.Any(r => r.Id == c.Id && r.FilePath == c.FilePath)));
+            Console.WriteLine("COLORS " + name + ": " + string.Join(", ", colors.Select(c => c.Label)));
+        });
+}
 Console.WriteLine($"{checks - failures.Count}/{checks} checks passed");
 if (failures.Count == 0 && args.Length == 2 && args[0] == "--catalog")
 {
@@ -566,3 +780,13 @@ if (failures.Count == 0 && args.Length == 2 && args[0] == "--catalog")
         $"{profiles.Count(p => p.Reader != "Unsupported")} IDs with protocol adapters");
 }
 return failures.Count == 0 ? 0 : 1;
+
+sealed class ImageHttpHandler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
+{
+    internal List<Uri> Seen { get; } = [];
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
+    {
+        Seen.Add(request.RequestUri!);
+        return Task.FromResult(response(request));
+    }
+}

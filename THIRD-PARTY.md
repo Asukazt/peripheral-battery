@@ -1,6 +1,6 @@
 # Third-party notices
 
-Peripheral Battery 0.2.0-preview.1 is an unofficial Windows peripheral battery utility.
+Peripheral Battery 0.2.0-preview.3 is an unofficial Windows peripheral battery utility.
 Original application code is MIT-licensed; upstream notices remain applicable.
 
 ## Protocol implementations
@@ -52,6 +52,11 @@ https://github.com/feathericons/feather/tree/v4.29.2
 Manufacturer product photographs and the user's private design reference are
 excluded from both public source and public binary packages. Device names
 identify supported products and do not imply manufacturer endorsement.
+At runtime the application may download model-specific photographs and color
+variants from Razer / ROG official pages and official image hosts into a local
+cache. Such photographs and trademarks remain the property of their respective
+rights holders; the project's MIT license does not license manufacturer artwork.
+Website availability, page structure and available variants may change.
 
 ## Microsoft runtime
 

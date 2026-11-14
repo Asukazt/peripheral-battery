@@ -12,12 +12,14 @@ namespace PeriDock;
 
 internal sealed class DockWindow : Window
 {
-    readonly List<(TextBlock Percent, Ellipse Dot, Grid Tile)> tiles = [];
+    readonly Controller controller;
+    readonly List<(TextBlock Percent, Ellipse Dot, Grid Tile, Image Product)> tiles = [];
     readonly Grid grid;
     readonly ScrollViewer scroll;
     string tileKey = "";
     internal DockWindow(Controller controller)
     {
+        this.controller = controller;
         Title = Program.AppName + " · 常驻悬浮窗";
         Width = 480; Height = 76;
         ResizeMode = ResizeMode.NoResize;
@@ -65,7 +67,9 @@ internal sealed class DockWindow : Window
             tile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
             tile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             tile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
-            tile.Children.Add(Product(states[i].Kind, 68, 54));
+            var state = states[i];
+            var product = Product(state, 68, 54);
+            tile.Children.Add(ProductChoice(state, product, () => controller.ChooseAppearance(state)));
             var percent = Text("--", 19, Ink, FontWeights.SemiBold);
             percent.TextWrapping = TextWrapping.NoWrap;
             Grid.SetColumn(percent, 1); tile.Children.Add(percent);
@@ -76,7 +80,7 @@ internal sealed class DockWindow : Window
                 var separator = new Border { Width = 1, Height = 40, Background = Line, HorizontalAlignment = HorizontalAlignment.Right };
                 Grid.SetColumn(separator, i); grid.Children.Add(separator);
             }
-            tiles.Add((percent, dot, tile));
+            tiles.Add((percent, dot, tile, product));
         }
     }
 
@@ -96,6 +100,7 @@ internal sealed class DockWindow : Window
         for (var i = 0; i < tiles.Count; i++)
         {
             var state = states[i];
+            UpdateProduct(tiles[i].Product, state);
             tiles[i].Percent.Text = state.PercentText;
             tiles[i].Percent.Foreground = state.IsStale(DateTimeOffset.UtcNow) ? Muted : state.Percent <= 25 ? Amber : Ink;
             tiles[i].Dot.Fill = StateBrush(state);

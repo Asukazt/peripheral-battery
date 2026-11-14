@@ -68,21 +68,45 @@ internal static class Visuals
         return frame;
     }
 
-    internal static Image Product(string id, double width, double height)
+    static readonly Dictionary<string, ImageSource> ProductSources = [];
+    internal static Image Product(BatteryState state, double width, double height)
     {
-        if (id is not ("keyboard" or "mouse" or "headset"))
+        var image = new Image
         {
-            var generic = Icon("battery-full", Math.Min(width, height), Muted);
-            generic.Width = width; generic.Height = height;
-            return generic;
-        }
-        var file = id + "-display.png";
-        return new Image
-        {
-            Source = new BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "assets", file))),
             Width = width, Height = height, Stretch = Stretch.Uniform,
             SnapsToDevicePixels = true
         };
+        UpdateProduct(image, state);
+        return image;
+    }
+    internal static void UpdateProduct(Image image, BatteryState state)
+    {
+        var key = state.ProductImagePath ?? "kind:" + state.Kind;
+        if (!ProductSources.TryGetValue(key, out var source))
+        {
+            if (state.ProductImagePath is { } file)
+            {
+                try
+                {
+                    var bitmap = new BitmapImage(); bitmap.BeginInit();
+                    bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.UriSource = new Uri(file);
+                    bitmap.DecodePixelWidth = 512; bitmap.EndInit(); bitmap.Freeze(); source = bitmap;
+                }
+                catch { source = null; }
+            }
+            source ??= IconSource(state.Kind switch { "mouse" => "mouse", "keyboard" => "keyboard", "headset" => "headphones", _ => "battery-full" }, Muted);
+            ProductSources[key] = source;
+        }
+        image.Source = source;
+        System.Windows.Automation.AutomationProperties.SetName(image, state.Name + " 产品图");
+    }
+    internal static Button ProductChoice(BatteryState state, Image image, Action choose)
+    {
+        var button = new Button { Content = image, Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+            Padding = new Thickness(0), Cursor = System.Windows.Input.Cursors.Hand, ToolTip = "更换颜色/外观", Template = ButtonTemplate };
+        System.Windows.Automation.AutomationProperties.SetName(button, state.Name + " 更换颜色/外观");
+        button.Click += (_, e) => { choose(); e.Handled = true; };
+        return button;
     }
 
     internal static StackPanel Brand()

@@ -12,13 +12,13 @@ internal sealed class DeviceRow
 {
     internal Grid Root { get; } = new();
     readonly TextBlock percent, status, updated, extra;
-    readonly Image connectionIcon;
+    readonly Image connectionIcon, product;
     readonly Ellipse dot;
     readonly Border fill;
     readonly bool compact;
     readonly double barWidth;
 
-    internal DeviceRow(BatteryState state, bool compact)
+    internal DeviceRow(BatteryState state, bool compact, Controller controller)
     {
         this.compact = compact;
         barWidth = compact ? 140 : 228;
@@ -26,9 +26,9 @@ internal sealed class DeviceRow
         Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(compact ? 86 : 220) });
         Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(compact ? 144 : 230) });
-        var image = Product(state.Kind, compact ? 78 : 184, compact ? 74 : 128);
-        image.HorizontalAlignment = HorizontalAlignment.Center;
-        Root.Children.Add(image);
+        product = Product(state, compact ? 78 : 184, compact ? 74 : 128);
+        product.HorizontalAlignment = HorizontalAlignment.Center;
+        Root.Children.Add(ProductChoice(state, product, () => controller.ChooseAppearance(state)));
         var labels = new StackPanel
         {
             VerticalAlignment = VerticalAlignment.Center,
@@ -77,6 +77,7 @@ internal sealed class DeviceRow
 
     internal void Update(BatteryState state)
     {
+        UpdateProduct(product, state);
         var stale = state.IsStale(DateTimeOffset.UtcNow);
         percent.Text = state.PercentText;
         percent.Foreground = stale ? Muted : state.Percent <= 25 ? Amber : Ink;
@@ -99,6 +100,7 @@ internal sealed class DeviceRow
 
 internal sealed class Popover : Window
 {
+    readonly Controller controller;
     readonly List<DeviceRow> rows = [];
     readonly StackPanel list;
     string rowKey = "";
@@ -108,6 +110,7 @@ internal sealed class Popover : Window
 
     internal Popover(Controller controller)
     {
+        this.controller = controller;
         Title = Program.AppName + " · 电量"; Width = 540; Height = 426;
         ResizeMode = ResizeMode.NoResize; ShowInTaskbar = false; Topmost = true; ShowActivated = false;
         var frame = WindowFrame(this);
@@ -141,7 +144,7 @@ internal sealed class Popover : Window
             rowKey = key; rows.Clear(); list.Children.Clear();
             foreach (var state in states)
             {
-                var row = new DeviceRow(state, true); rows.Add(row); list.Children.Add(row.Root);
+                var row = new DeviceRow(state, true, controller); rows.Add(row); list.Children.Add(row.Root);
             }
             if (states.Count == 0) list.Children.Add(Text("未发现 ROG / Razer 外设", 14, Muted));
         }
@@ -168,6 +171,7 @@ internal sealed class Popover : Window
 
 internal sealed class DetailWindow : Window
 {
+    readonly Controller controller;
     readonly List<DeviceRow> rows = [];
     readonly StackPanel list;
     string rowKey = "";
@@ -177,6 +181,7 @@ internal sealed class DetailWindow : Window
 
     internal DetailWindow(Controller controller)
     {
+        this.controller = controller;
         Title = Program.AppName + " · 外设电量";
         Width = 860; Height = 600; MinWidth = 800; MinHeight = 600;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -256,7 +261,7 @@ internal sealed class DetailWindow : Window
             foreach (var state in states)
             {
                 if (rows.Count > 0) list.Children.Add(new Border { Height = 1, Background = Line });
-                var row = new DeviceRow(state, false); rows.Add(row); list.Children.Add(row.Root);
+                var row = new DeviceRow(state, false, controller); rows.Add(row); list.Children.Add(row.Root);
             }
             if (states.Count == 0) list.Children.Add(Text("未发现 ROG / Razer 外设", 16, Muted));
         }

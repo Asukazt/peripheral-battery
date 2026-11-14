@@ -12,11 +12,12 @@
     <Product>Peripheral Battery</Product>
     <Title>Peripheral Battery</Title>
     <Description>Peripheral battery levels and mouse DPI</Description>
-    <Version>0.2.0-preview.2</Version>
+    <Version>0.2.0-preview.3</Version>
     <StartupObject>PeriDock.Program</StartupObject>
     <ApplicationIcon>..\assets\peridock.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="official-products.json" />
     <Compile Remove="tests\**" />
     <Compile Remove="ui-checks\**" />
     <InternalsVisibleTo Include="PeriDock.UiChecks"/>

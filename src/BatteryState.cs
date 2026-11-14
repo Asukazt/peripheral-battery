@@ -12,6 +12,8 @@ internal sealed class BatteryState(string id, string name, string shortName, str
     public string Name { get; } = name;
     public string ShortName { get; } = shortName;
     public string Kind { get; } = kind ?? id;
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal string? ProductImagePath { get; set; }
     public string Connection { get; private set; } = "识别中";
     public bool? Connected { get; private set; }
     public string? ChargingNote { get; private set; }
@@ -27,6 +29,7 @@ internal sealed class BatteryState(string id, string name, string shortName, str
     public ReadFailure Failure { get; private set; }
     public int? ErrorCode { get; private set; }
     public string PercentText => Percent.HasValue ? $"{Percent}%" : "--";
+    internal string TrayText => (Kind switch { "keyboard" => "键盘", "mouse" => "鼠标", "headset" => "耳机", _ => "设备" }) + "：" + PercentText;
     public string DpiText => DpiX.HasValue && LastReadSucceeded && !IsStale(DateTimeOffset.UtcNow)
         ? DpiX == DpiY ? $"{DpiX} DPI" : $"{DpiX} × {DpiY} DPI" : "未知";
     public bool IsStale(DateTimeOffset now) => Cached || !LastReadSucceeded || !LastSuccess.HasValue ||

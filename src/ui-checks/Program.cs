@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using PeriDock;
 
 internal static class UiChecks
@@ -39,6 +40,7 @@ internal static class UiChecks
                 value.TryGetProperty("ErrorCode", out var error) && error.ValueKind != JsonValueKind.Null ? error.GetInt32() : null), DateTimeOffset.Now);
         }
         var windows = new List<(string Name, Window Window)>();
+        var failures = new List<string>();
         void AddWindows(string suffix)
         {
             var details = new DetailWindow(controller);
@@ -59,7 +61,52 @@ internal static class UiChecks
             details.Update(controller.States, false, "暂无错误"); popover.Update(controller.States, false); dock.Update(controller.States);
         }
         AddWindows("");
-        var failures = new List<string>();
+        foreach (var (_, window) in windows)
+        {
+            var root = (FrameworkElement)window.Content;
+            void Update()
+            {
+                if (window is DetailWindow details) details.Update(controller.States, false, "暂无错误");
+                if (window is Popover popover) popover.Update(controller.States, false);
+                if (window is DockWindow dock) dock.Update(controller.States);
+                root.Measure(new Size(window.Width, window.Height));
+                root.Arrange(new Rect(0, 0, window.Width, window.Height)); root.UpdateLayout();
+            }
+            Image[] Products() => Descendants(root).OfType<Image>().Where(i =>
+                System.Windows.Automation.AutomationProperties.GetName(i).EndsWith(" 产品图")).ToArray();
+            Update(); var before = Products();
+            var photo = Path.Combine(AppContext.BaseDirectory, "assets", "peridock.png");
+            controller.States[1].ProductImagePath = photo; Update(); var after = Products();
+            if (before.Length != 3 || !before.SequenceEqual(after) || after[1].Source is not BitmapImage ||
+                ReferenceEquals(after[0].Source, after[1].Source)) failures.Add("product photo did not update the existing " + window.GetType().Name);
+            controller.States[1].ProductImagePath = null; Update();
+            if (Products()[1].Source is BitmapImage) failures.Add("generic image choice did not clear the photo");
+        }
+        var appearanceRoot = Path.Combine(Path.GetTempPath(), "PeriDock-appearance-" + Guid.NewGuid().ToString("N"));
+        var white = new ProductImageOption("white", "白色", Path.Combine(AppContext.BaseDirectory, "assets", "peridock.png"));
+        if (args.Length > 2)
+        {
+            var folder = Path.Combine(Path.GetFullPath(args[2]), "data", "device-images");
+            var key = OfficialProductImages.FileKey("Razer Basilisk V3 Pro");
+            var variants = JsonSerializer.Deserialize<OfficialImageVariant[]>(File.ReadAllText(Path.Combine(folder, key + ".options.json")))!;
+            var variant = variants.First(v => v.Label == "白色");
+            white = new(variant.Id, variant.Label, Path.Combine(folder, key + "-" + variant.Id + ".png"));
+        }
+        var appearance = new AppearanceWindow(new("appearance", "Razer Basilisk V3 Pro", "Basilisk", "mouse"), "auto",
+            () => System.Threading.Tasks.Task.FromResult<IReadOnlyList<ProductImageOption>>([
+                new("auto", "自动", null), white, new("generic", "通用图标", null)]), value =>
+            {
+                new UserSettings(true, new() { ["test"] = value.Id }).Save(appearanceRoot); return true;
+            });
+        appearance.Show(); appearance.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        var whiteButton = Descendants((FrameworkElement)appearance.Content).OfType<Button>().Single(b =>
+            System.Windows.Automation.AutomationProperties.GetName(b) == "选择白色");
+        whiteButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (UserSettings.Load(appearanceRoot, new Diagnostics(appearanceRoot)).ImageChoices?["test"] != white.Id ||
+            !Descendants((FrameworkElement)appearance.Content).OfType<TextBlock>().Any(t => t.Text.Contains("已选择：白色，已保存")))
+            failures.Add("appearance selection did not save and confirm white");
+        appearance.Hide(); Directory.Delete(appearanceRoot, true);
+        windows.Add(("PeriDock-appearance-white", appearance));
         controller.States[0].Apply(new Reading(40, true, null, null, "ROG HID", "已连接",
             Connection: "蓝牙", Connected: true), DateTimeOffset.Now);
         controller.States[1].Apply(new Reading(50, false, 1600, 1600, "Razer HID", "已连接",

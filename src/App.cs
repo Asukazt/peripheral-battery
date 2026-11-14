@@ -80,6 +80,7 @@ internal sealed class Controller
     internal bool Exiting { get; private set; }
     readonly string root;
     readonly Diagnostics log;
+    readonly OfficialProductImages productImages;
     readonly CancellationTokenSource stop = new();
     readonly Dictionary<string, int> misses = [];
     readonly Dictionary<string, DateTimeOffset> nextRead = [];
@@ -99,6 +100,7 @@ internal sealed class Controller
     internal Controller(string root, Diagnostics log)
     {
         this.root = root; this.log = log;
+        productImages = new(root, log);
         settings = UserSettings.Load(root, log);
     }
 
@@ -119,6 +121,13 @@ internal sealed class Controller
         TrayMenu.Opening += (_, _) => UpdateStartupOption();
         UpdateStartupOption();
         TrayMenu.Items.Add("刷新电量", null, (_, _) => _ = Refresh());
+        var appearances = new Forms.ToolStripMenuItem("设备图片与颜色");
+        TrayMenu.Opening += (_, _) =>
+        {
+            appearances.DropDownItems.Clear(); appearances.Enabled = States.Count > 0;
+            foreach (var state in States) appearances.DropDownItems.Add(state.Name, null, (_, _) => ChooseAppearance(state));
+        };
+        TrayMenu.Items.Add(appearances);
         TrayMenu.Items.Add("打开日志", null, (_, _) => OpenLogs());
         elevationOption = new Forms.ToolStripMenuItem("以管理员权限重启…") { Enabled = false };
         elevationOption.Click += (_, _) => RestartElevated();
@@ -148,7 +157,7 @@ internal sealed class Controller
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         if (settings.ShowDock) host.Show();
         refreshTimer.Start(); uiTimer.Start();
-        log.Write("info", "app", "start", Program.AppName + " 0.2.0-preview.2 started");
+        log.Write("info", "app", "start", Program.AppName + " 0.2.0-preview.3 started");
         if (showDetails) ShowDetails();
         else if (showPopover) popover.OpenAt(Anchor(), true);
         _ = Refresh();
@@ -263,6 +272,7 @@ internal sealed class Controller
                 return order == 0 ? string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase) : order;
             });
             UpdateViews();
+            foreach (var state in States.Where(s => s.ProductImagePath is null)) _ = LoadProductImage(state);
             using var probeSlots = new SemaphoreSlim(3);
             var jobs = States.Where(s => force || !nextRead.TryGetValue(s.Id, out var due) || due <= DateTimeOffset.UtcNow)
                 .Select(async state =>
@@ -317,12 +327,47 @@ internal sealed class Controller
         }
         finally { refreshing = false; if (!Exiting) UpdateViews(); }
     }
+    async Task LoadProductImage(BatteryState state)
+    {
+        var selected = settings.ImageChoices?.GetValueOrDefault(OfficialProductImages.FileKey(state.Name)) ?? "auto";
+        try
+        {
+            var file = selected == "auto" ? await productImages.GetAsync(state.Name, stop.Token) : selected == "generic" ? null :
+                (await productImages.GetOptionsAsync(state.Name, stop.Token)).FirstOrDefault(o => o.Id == selected)?.FilePath ??
+                    await productImages.GetAsync(state.Name, stop.Token);
+            if (!Exiting && file is not null && state.ProductImagePath != file &&
+                selected == (settings.ImageChoices?.GetValueOrDefault(OfficialProductImages.FileKey(state.Name)) ?? "auto"))
+            {
+                state.ProductImagePath = file;
+                UpdateViews();
+            }
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+    }
+    internal void ChooseAppearance(BatteryState state)
+    {
+        var key = OfficialProductImages.FileKey(state.Name);
+        var window = new AppearanceWindow(state, settings.ImageChoices?.GetValueOrDefault(key) ?? "auto",
+            () => productImages.GetOptionsAsync(state.Name, stop.Token), choice =>
+            {
+                try
+                {
+                    var selections = new Dictionary<string, string>(settings.ImageChoices ?? []);
+                    selections[key] = choice.Id;
+                    var next = settings with { ImageChoices = selections }; next.Save(root); settings = next;
+                    foreach (var device in States.Where(s => OfficialProductImages.FileKey(s.Name) == key)) device.ProductImagePath = choice.FilePath;
+                    UpdateViews(); return true;
+                }
+                catch (Exception ex) { SettingsError("save-image-choice", ex); return false; }
+            });
+        window.Show();
+    }
     void UpdateViews()
     {
         if (Exiting) return;
         elevationOption.Enabled = !Elevation.IsElevated && States.Any(s => s.Failure == ReadFailure.AccessDenied);
         host.Update(States); popover.Update(States, refreshing); details.Update(States, refreshing, message);
-        var summary = string.Join(" · ", States.Select(s => s.Name + " " + s.PercentText));
+        var summary = string.Join(" · ", States.Select(s => s.TrayText));
         tray.Text = summary.Length == 0 ? Program.AppName + " · 未发现外设" : summary.Length < 63 ? summary : summary[..60] + "…";
     }
     internal void OpenLogs()
