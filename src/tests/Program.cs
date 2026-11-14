@@ -22,6 +22,7 @@ void Equal<T>(T expected, T actual)
 }
 
 MultiBrandTests.Run(Check);
+OfficialImageTests.Run(Check);
 Check("mouse battery request has the documented command and checksum", () =>
 {
     var p = Protocols.MouseRequest(0x07, 0x80, 2);
@@ -854,6 +855,25 @@ if (args.Length == 2 && args[0] == "--official-images")
             var restored = new OfficialProductImages(args[1], new Diagnostics(args[1]), offline).GetOptionsAsync(name).GetAwaiter().GetResult();
             Equal(true, colors.All(c => restored.Any(r => r.Id == c.Id && r.FilePath == c.FilePath)));
             Console.WriteLine("COLORS " + name + ": " + string.Join(", ", colors.Select(c => c.Label)));
+        });
+}
+if (args.Length == 2 && args[0] == "--new-brand-images")
+{
+    foreach (var product in OfficialProductImages.KnownProducts)
+        Check("live verified official assets and offline restore: " + product.Models[0], () =>
+        {
+            var images = new OfficialProductImages(args[1], new Diagnostics(args[1]));
+            var options = images.GetOptionsAsync(product.Models[0]).GetAwaiter().GetResult();
+            var colors = options.Where(o => o.Id is not ("auto" or "generic")).ToArray();
+            Equal(product.Colors.Length, colors.Length);
+            Equal(true, colors.All(c => c.FilePath is not null && File.Exists(c.FilePath)));
+            Equal(true, options.Single(o => o.Id == "auto").FilePath is not null);
+            using var handler = new ImageHttpHandler(_ => throw new HttpRequestException("offline"));
+            using var offline = new HttpClient(handler);
+            var restored = new OfficialProductImages(args[1], new Diagnostics(args[1]), offline).GetOptionsAsync(product.Models[0]).GetAwaiter().GetResult();
+            Equal(true, colors.All(c => restored.Any(o => o.Id == c.Id && o.FilePath == c.FilePath)));
+            Equal(0, handler.Seen.Count);
+            Console.WriteLine("OFFICIAL " + product.Models[0] + ": " + string.Join(", ", colors.Select(c => c.Label)));
         });
 }
 Console.WriteLine($"{checks - failures.Count}/{checks} checks passed");

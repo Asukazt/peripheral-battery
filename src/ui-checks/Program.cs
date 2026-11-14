@@ -85,7 +85,7 @@ internal static class UiChecks
         var appearanceRoot = Path.Combine(Path.GetTempPath(), "PeriDock-appearance-" + Guid.NewGuid().ToString("N"));
         var imageService = new OfficialProductImages(appearanceRoot, new Diagnostics(appearanceRoot));
         var white = new ProductImageOption("white", "白色", Path.Combine(AppContext.BaseDirectory, "assets", "peridock.png"));
-        if (args.Length > 2)
+        if (args.Length > 2 && args[2] != "--new-images")
         {
             var folder = Path.Combine(Path.GetFullPath(args[2]), "data", "device-images");
             var key = OfficialProductImages.FileKey("Razer Basilisk V3 Pro");
@@ -140,6 +140,29 @@ internal static class UiChecks
         if (UserSettings.Load(appearanceRoot, new Diagnostics(appearanceRoot)).ImageChoices?["test"] != "custom" ||
             !Descendants((FrameworkElement)custom.Content).OfType<TextBlock>().Any(t => t.Text.StartsWith("导入失败"))) failures.Add("failed import cleared the previous choice or lacked feedback");
         custom.Hide(); windows.Add(("PeriDock-appearance-custom", custom));
+        if (args.Length == 4 && args[2] == "--new-images")
+        {
+            var official = new OfficialProductImages(Path.GetFullPath(args[3]), new Diagnostics(appearanceRoot));
+            var models = new[] { "Logitech G733", "HyperX Cloud III Wireless", "MCHOSE A7 V2 Ultra",
+                "ATK X1 Ultimate", "AULA F75", "VXE R1 Pro Max", "VGN F1 Moba" };
+            foreach (var name in models)
+            {
+                var choices = official.GetOptionsAsync(name).GetAwaiter().GetResult();
+                var selected = choices.First(c => c.Id is not ("auto" or "generic"));
+                var key = OfficialProductImages.FileKey(name);
+                var state = new BatteryState(key, name, name, "mouse") { ProductImagePath = choices[0].FilePath };
+                var picker = new AppearanceWindow(state, "auto", () => System.Threading.Tasks.Task.FromResult(choices), value =>
+                {
+                    new UserSettings(true, new() { [key] = value.Id }).Save(appearanceRoot); return true;
+                }, file => imageService.ImportAsync(name, file));
+                picker.Show(); picker.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                Descendants((FrameworkElement)picker.Content).OfType<Button>().Single(b =>
+                    System.Windows.Automation.AutomationProperties.GetName(b) == "选择" + selected.Label).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                if (UserSettings.Load(appearanceRoot, new Diagnostics(appearanceRoot)).ImageChoices?[key] != selected.Id)
+                    failures.Add("new-brand official appearance was not saved: " + name);
+                picker.Hide(); windows.Add(("PeriDock-official-" + key, picker));
+            }
+        }
         controller.States[0].Apply(new Reading(40, true, null, null, "ROG HID", "已连接",
             Connection: "蓝牙", Connected: true), DateTimeOffset.Now);
         controller.States[1].Apply(new Reading(50, false, 1600, 1600, "Razer HID", "已连接",

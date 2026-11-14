@@ -1,12 +1,12 @@
 # Peripheral Battery Preview
 
-Windows 多品牌外设电量组件，0.2.0-preview.5 六品牌协议扩展测试版。
+Windows 多品牌外设电量组件，v0.2.0-preview.5 图片补充构建（0.2.0-preview.5-images.1）。
 自动发现已连接设备，集中显示电量、连接方式、可读的充电状态与部分雷蛇鼠标 DPI。
 这是扩大协议覆盖范围的测试版，不承诺所有型号、固件或接收器均可读取。
 
 ## 下载与运行
 
-完整解压 `Peripheral-Battery-v0.2.0-preview.5-win-x64.zip` 到新的可写目录，
+完整解压 `Peripheral-Battery-v0.2.0-preview.5-images.1-win-x64.zip` 到新的可写目录，
 例如 `D:\PeripheralBatteryPreview`，双击 `PeriDock.exe`，按 Windows 提示确认管理员权限。
 自带 .NET，无需安装 SDK。不要在压缩包内启动，也不要覆盖当前安装。
 
@@ -16,9 +16,11 @@ Windows 多品牌外设电量组件，0.2.0-preview.5 六品牌协议扩展测�
 多设备时可滚动查看。测试版使用按安装目录区分的进程锁和程序目录中的设置、日志，
 可以与原版或其他目录的预览版共存；测试版暂不提供开机启动，避免覆盖原版启动注册。
 
+补充包附加在原 [v0.2.0-preview.5 发布页](https://github.com/Asukazt/peripheral-battery/releases/tag/v0.2.0-preview.5)，原标签及原资产保留；请按 `images.1` 文件名选择本次构建。
+
 ## 官网图片与颜色选择
 
-识别到内置映射中的具体型号后，在后台从 Razer / ROG 官方产品页或图库获取对应图片，
+识别到内置映射中的具体型号后，在后台获取 Razer / ROG 及 Logitech、HyperX、MCHOSE、ATK、AULA、VGN/VXE 的官网图片，
 电量读取不等待网络。首次需要联网；成功后缓存在 `data/device-images/`，可离线使用。
 匹配不到型号、官网下架、页面结构改变或网络失败时显示通用类别图标，
 不会把另一款鼠标的图片套用到未知型号。失败后约 24 小时重试。
@@ -72,7 +74,7 @@ USB 已枚举不等于读到了电量；2.4G 接收器存在也不代表其无�
 罗技接收器按配对槽位区分，共享 OEM ID 同时校验产品名称，不向无依据的变体盲发命令。
 详细系列、例外、协议依据与验证边界见 [六品牌兼容说明](docs/MULTIBRAND-COMPATIBILITY.md)。
 **六个新品牌未在本机实机验证，不宣称全型号通杀。**
-新品牌使用通用图标或自定义图片，未新增官网素材映射。
+新品牌图片补充了 25 组官方来源、39 个精确名称别名及 38 张图片/配色；完整清单、系列图含义与缺项见 [官网图片覆盖](docs/OFFICIAL-IMAGES.md)。共享接收器及未映射型号保留通用/自定义图片。
 
 ## 兼容范围
 
@@ -138,6 +140,6 @@ dotnet publish src/PeriDock.csproj -c Release -r win-x64 --self-contained true -
 UI 检查使用模拟数据。公开包不含个人设置、实时状态、日志、设计参考图或 SDK。
 发行包包含 LICENSE、THIRD-PARTY.md 与 docs/licenses/，自包含运行时许可随包提供。
 原创代码采用 MIT，第三方来源见 [THIRD-PARTY.md](THIRD-PARTY.md)。
-公开包内置通用设备图标，运行时可从官网获取产品图片；图片、ASUS、ROG、Razer 与产品名称归各自权利人所有，
+公开包内置通用设备图标，运行时可从官网获取产品图片；图片、各厂商品牌与产品名称归各自权利人所有，
 厂商图片不因本项目 MIT 许可而改变授权。
 本项目是非官方工具，与厂商无隶属关系。

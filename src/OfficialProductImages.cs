@@ -10,11 +10,14 @@ namespace PeriDock;
 
 internal sealed record ProductImageOption(string Id, string Label, string? FilePath);
 internal sealed record OfficialImageVariant(string Id, string Label, Uri Page, Uri Image);
+internal sealed record OfficialImageColor(string Label, Uri Image);
+internal sealed record OfficialImageProduct(string[] Models, Uri Page, OfficialImageColor[] Colors);
 
 internal sealed class OfficialProductImages(string root, Diagnostics log, HttpClient? transport = null)
 {
     static readonly HttpClient Client = new(new HttpClientHandler { AllowAutoRedirect = false });
     static readonly Dictionary<string, string> Pages = LoadPages();
+    internal static readonly OfficialImageProduct[] KnownProducts = LoadProducts();
     readonly Dictionary<string, (DateTimeOffset Until, Task<string?> Work)> requests = [];
     readonly Dictionary<string, (DateTimeOffset Until, Task<IReadOnlyList<ProductImageOption>> Work)> optionRequests = [];
     readonly SemaphoreSlim slots = new(2);
@@ -24,10 +27,20 @@ internal sealed class OfficialProductImages(string root, Diagnostics log, HttpCl
         return JsonSerializer.Deserialize<Dictionary<string, string>>(stream)!
             .ToDictionary(p => DeviceCatalog.ModelKey(p.Key), p => p.Value);
     }
+    static OfficialImageProduct[] LoadProducts()
+    {
+        using var stream = typeof(OfficialProductImages).Assembly.GetManifestResourceStream("PeriDock.official-image-sources.json")!;
+        return JsonSerializer.Deserialize<OfficialImageProduct[]>(stream)!;
+    }
+    static IReadOnlyList<OfficialImageVariant> CatalogVariants(string name)
+        => KnownProducts.FirstOrDefault(p => p.Models.Any(m => ModelKey(m) == ModelKey(name)))?.Colors.Take(8)
+            .Select(c => new OfficialImageVariant(DeviceCatalog.Key(c.Image.AbsoluteUri), c.Label,
+                PageFor(name)!, c.Image)).ToArray() ?? [];
     internal static string ModelKey(string name)
         => DeviceCatalog.ModelKey(Regex.Replace(name, @"\s*\((?:BT|Bluetooth|USB|2\.4G)\)\s*$", "", RegexOptions.IgnoreCase));
     internal static Uri? PageFor(string name)
-        => Pages.TryGetValue(ModelKey(name), out var page) ? new Uri(page) : null;
+        => Pages.TryGetValue(ModelKey(name), out var page) ? new Uri(page) :
+            KnownProducts.FirstOrDefault(p => p.Models.Any(m => ModelKey(m) == ModelKey(name)))?.Page;
     internal static string FileKey(string name) => DeviceCatalog.Key(ModelKey(name));
     internal static string OverridePath(string root, string name)
         => Path.Combine(root, "data", "device-images", "overrides", FileKey(name) + ".png");
@@ -65,7 +78,7 @@ internal sealed class OfficialProductImages(string root, Diagnostics log, HttpCl
         {
             "www.razer.com" => image ? uri.Host is "assets2.razerzone.com" or "assets3.razerzone.com" or "assets.razerzone.com" or "assets.razer.com" : uri.Host == page.Host,
             "rog.asus.com" => image ? uri.Host is "dlcdnwebimgs.asus.com" or "dlcdnimgs.asus.com" : uri.Host == page.Host,
-            _ => false
+            _ => KnownProducts.Any(p => p.Page == page && (image ? p.Colors.Any(c => c.Image == uri) : uri == page))
         };
     }
     static string PageModel(Uri page)
@@ -183,12 +196,17 @@ internal sealed class OfficialProductImages(string root, Diagnostics log, HttpCl
             if (page is null || File.Exists(retry) && DateTime.UtcNow - File.GetLastWriteTimeUtc(retry) < TimeSpan.FromHours(24)) return null;
             Directory.CreateDirectory(folder);
             await File.WriteAllTextAsync(retry, "", cancellation).ConfigureAwait(false);
-            string html;
-            var optionsPage = new Uri(page.AbsoluteUri.TrimEnd('/') + (page.Host == "www.razer.com" ? "/buy" : "/gallery/"));
-            try { html = Encoding.UTF8.GetString(await FetchAsync(optionsPage, page, false, cancellation).ConfigureAwait(false)); }
-            catch (Exception) when (!cancellation.IsCancellationRequested)
-            { html = Encoding.UTF8.GetString(await FetchAsync(page, page, false, cancellation).ConfigureAwait(false)); }
-            var variants = VariantsFromPage(page, html);
+            // Verified CDN links avoid storefront scripts/bot challenges; no device names enter a search query.
+            var variants = CatalogVariants(name);
+            string html = "";
+            if (variants.Count == 0)
+            {
+                var optionsPage = new Uri(page.AbsoluteUri.TrimEnd('/') + (page.Host == "www.razer.com" ? "/buy" : "/gallery/"));
+                try { html = Encoding.UTF8.GetString(await FetchAsync(optionsPage, page, false, cancellation).ConfigureAwait(false)); }
+                catch (Exception) when (!cancellation.IsCancellationRequested)
+                { html = Encoding.UTF8.GetString(await FetchAsync(page, page, false, cancellation).ConfigureAwait(false)); }
+                variants = VariantsFromPage(page, html);
+            }
             if (variants.Count > 0) await SaveVariants(name, variants, cancellation).ConfigureAwait(false);
             var image = variants.FirstOrDefault()?.Image ?? ImageFromPage(page, html) ?? throw new InvalidDataException("官网页面未提供匹配型号的图片");
             var bytes = await FetchAsync(image, page, true, cancellation).ConfigureAwait(false);
@@ -234,13 +252,14 @@ internal sealed class OfficialProductImages(string root, Diagnostics log, HttpCl
             if (page is not null)
             {
                 var metadata = OptionsFile(name);
-                IReadOnlyList<OfficialImageVariant> variants = [];
-                if (File.Exists(metadata) && new FileInfo(metadata).Length < 1024 * 1024)
+                IReadOnlyList<OfficialImageVariant> variants = CatalogVariants(name);
+                var pinned = variants.Count > 0;
+                if (!pinned && File.Exists(metadata) && new FileInfo(metadata).Length < 1024 * 1024)
                 {
                     try { variants = JsonSerializer.Deserialize<OfficialImageVariant[]>(await File.ReadAllTextAsync(metadata, cancellation).ConfigureAwait(false)) ?? []; }
                     catch (JsonException) { }
                 }
-                if (variants.Count == 0 || DateTime.UtcNow - File.GetLastWriteTimeUtc(metadata) > TimeSpan.FromDays(7))
+                if (!pinned && (variants.Count == 0 || DateTime.UtcNow - File.GetLastWriteTimeUtc(metadata) > TimeSpan.FromDays(7)))
                 {
                     try
                     {

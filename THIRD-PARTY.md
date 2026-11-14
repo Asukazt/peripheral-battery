@@ -70,3 +70,9 @@ and Microsoft.WindowsDesktop.App.Runtime.win-x64 8.0.33 runtime libraries.
 It also contains Microsoft.Windows.SDK.NET and WinRT.Runtime from the build.
 Microsoft licenses and third-party notices are included under docs/licenses/.
 These notices apply in addition to the application's MIT license.
+
+## 新品牌运行时官网图片
+
+Logitech、HP/HyperX、MCHOSE、ATK、VXE/VGN、AULA 产品图片在运行时从已核对的官方来源下载，
+具体地址及系列图限制见 docs/OFFICIAL-IMAGES.md 与 src/official-image-sources.json。
+公开运行包与源码包仅提供地址和程序，不附带图片缓存；厂商图片不随本项目 MIT 许可重新授权。
