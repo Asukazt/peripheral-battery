@@ -25,7 +25,8 @@ internal static partial class DeviceReader
                 {
                     // A paired BLE device may also expose classic Bluetooth; prefer its readable Battery Service.
                     if (!lowEnergy && targets.Any(t => t.BluetoothId is not null && DeviceCatalog.ModelKey(t.Name) == DeviceCatalog.ModelKey(device.Name))) continue;
-                    targets.Add(new("bt-" + DeviceCatalog.Key(device.Id), device.Name.Trim(), DeviceCatalog.Kind(device.Name), true, device.Id, lowEnergy));
+                    targets.Add(new("bt-" + DeviceCatalog.Key(device.Id), device.Name.Trim(), DeviceCatalog.Kind(device.Name), true,
+                        device.Id, lowEnergy, Connection: "蓝牙"));
                 }
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
@@ -86,20 +87,61 @@ internal static partial class DeviceReader
         var target = DeviceCatalog.FromHid(NativeDevices.EnumerateHid(0x1532).Concat(NativeDevices.EnumerateHid(0x0b05)))
             .FirstOrDefault(t => t.Id == requested.Id);
         if (target is null) return Missing();
+        return await ReadHidTarget(target);
+    }
+
+    internal static async Task<Reading> ReadHidTarget(DeviceTarget target,
+        Func<HidDevice[], DeviceProfile, Task<Reading>>? query = null)
+    {
         var first = target.Interfaces[0];
         var profile = DeviceCatalog.Find(first.Vendor, first.Product);
+        var inaccessible = target.Interfaces.Where(d => d.AccessError.HasValue)
+            .OrderByDescending(d => d.AccessError == 5).FirstOrDefault();
+        var available = target.Interfaces.Where(d => d.AccessError is null).ToArray();
+        if (available.Length == 0 && inaccessible is not null)
+            return HidFailure(target, new Win32Exception(inaccessible.AccessError!.Value, "无法访问 HID 接口"));
         if (profile is null || !target.Supported)
             return new(null, null, null, null, "HID 设备识别", $"已识别 {first.Vendor:x4}:{first.Product:x4}，电量协议尚未适配",
-                ChargingNote: "不向未知型号发送查询命令");
-        if (profile.Reader == "RazerFeature") return ReadMouse(target.Interfaces, profile);
+                Connection: target.Connection, ChargingNote: "不向未知型号发送查询命令", Failure: ReadFailure.ProtocolUnsupported);
+        try
+        {
+            var result = await (query ?? ReadHidCore)(available, profile);
+            if (result.Percent is null && result.Connected != false && inaccessible is not null)
+                return HidFailure(target, new Win32Exception(inaccessible.AccessError!.Value, "部分 HID 接口无法访问"));
+            return result.Connection == "待确认" ? result with { Connection = target.Connection } : result;
+        }
+        catch (Exception ex) when (ex is IOException or Win32Exception or UnauthorizedAccessException or OperationCanceledException)
+        {
+            if (inaccessible?.AccessError == 5 && Diagnostics.NativeError(ex) != 5)
+                ex = new Win32Exception(5, "部分 HID 接口访问被拒绝");
+            return HidFailure(target, ex);
+        }
+    }
+
+    internal static Reading HidFailure(DeviceTarget target, Exception error)
+    {
+        var code = Diagnostics.NativeError(error);
+        var denied = code == 5;
+        new Diagnostics(AppContext.BaseDirectory).HidFailure(target.Interfaces[0], "read", error);
+        return new(null, null, null, null, "HID " + target.HardwareId,
+            denied ? "已识别设备；访问被拒绝（Windows 错误 5）" :
+                error is OperationCanceledException ? "已识别设备；查询超时" : "已识别设备；" + Diagnostics.Redact(error.Message),
+            Connection: target.Connection,
+            ChargingNote: denied ? "可在设置菜单选择“以管理员权限重启”；拒绝访问不能证明是厂商软件占用" : null,
+            Failure: denied ? ReadFailure.AccessDenied : ReadFailure.ReadError, ErrorCode: code);
+    }
+
+    static async Task<Reading> ReadHidCore(HidDevice[] interfaces, DeviceProfile profile)
+    {
+        if (profile.Reader == "RazerFeature") return ReadMouse(interfaces, profile);
         if (profile.Reader == "Omni")
         {
             // shortcut: only the verified Azoth X slot is queried until other OMNI routes have captured replies.
-            var result = await ReadKeyboardHid(target.Interfaces);
+            var result = await ReadKeyboardHid(interfaces);
             return result.Value ?? new(null, null, null, null, "ROG OMNI", result.Issue ?? "当前配对槽位尚未适配");
         }
         Exception? last = null;
-        foreach (var device in target.Interfaces.OrderByDescending(d => d.UsagePage >= 0xff00))
+        foreach (var device in interfaces.OrderByDescending(d => d.UsagePage >= 0xff00))
         {
             try
             {
@@ -114,10 +156,15 @@ internal static partial class DeviceReader
                     (profile.Kind != "mouse" || device.Path.Contains("mi_00", StringComparison.OrdinalIgnoreCase)))
                     return await ReadAsus(device, profile);
             }
-            catch (Exception ex) when (ex is IOException or Win32Exception or OperationCanceledException) { last = ex; }
+            catch (Exception ex) when (ex is IOException or Win32Exception or UnauthorizedAccessException or OperationCanceledException)
+            {
+                new Diagnostics(AppContext.BaseDirectory).HidFailure(device, "query", ex);
+                if (last is null || Diagnostics.NativeError(last) != 5) last = ex;
+            }
         }
         if (last is not null) throw last;
-        return new(null, null, null, null, profile.Reader, "已发现型号，但未找到可用的电量接口");
+        return new(null, null, null, null, profile.Reader, "已发现型号，但未找到可用的电量接口",
+            Failure: ReadFailure.ProtocolUnsupported);
     }
 
     static Reading Missing() => new(null, null, null, null, "设备发现", "设备已移除", Connection: "未连接", Connected: false);

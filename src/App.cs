@@ -16,6 +16,11 @@ internal static class Program
     {
         var root = AppContext.BaseDirectory;
         var log = new Diagnostics(root);
+        if (args.Length == 2 && args[0] == "--wait-for-exit")
+        {
+            if (!Elevation.IsElevated || !Elevation.WaitForParent(args[1])) return 1;
+            args = [];
+        }
         if (args.Length == 1 && args[0] is "--discover" or "--target-probe")
         {
             try
@@ -35,7 +40,7 @@ internal static class Program
             try { Console.WriteLine(JsonSerializer.Serialize(DeviceReader.Probe(args[1]).GetAwaiter().GetResult())); return 0; }
             catch (Exception ex) { Console.Error.WriteLine(Diagnostics.Redact(ex.GetType().Name + ": " + ex.Message)); return 1; }
         }
-        using var instance = new Mutex(true, @"Local\PeriDock-Compatibility-Preview", out var created);
+        using var instance = new Mutex(true, @"Local\PeriDock-Compatibility-Preview-" + DeviceCatalog.Key(root), out var created);
         if (!created)
         {
             if (args.Contains("--startup")) return 0;
@@ -85,7 +90,7 @@ internal sealed class Controller
     Popover popover = null!;
     DetailWindow details = null!;
     Forms.NotifyIcon tray = null!;
-    Forms.ToolStripMenuItem dockOption = null!, startupOption = null!;
+    Forms.ToolStripMenuItem dockOption = null!, startupOption = null!, elevationOption = null!;
     UserSettings settings;
     bool refreshing;
     bool anchorFromTray;
@@ -115,6 +120,9 @@ internal sealed class Controller
         UpdateStartupOption();
         TrayMenu.Items.Add("刷新电量", null, (_, _) => _ = Refresh());
         TrayMenu.Items.Add("打开日志", null, (_, _) => OpenLogs());
+        elevationOption = new Forms.ToolStripMenuItem("以管理员权限重启…") { Enabled = false };
+        elevationOption.Click += (_, _) => RestartElevated();
+        TrayMenu.Items.Add(elevationOption);
         TrayMenu.Items.Add(new Forms.ToolStripSeparator());
         TrayMenu.Items.Add("退出 " + Program.AppName, null, (_, _) => Exit());
         tray = new Forms.NotifyIcon
@@ -140,7 +148,7 @@ internal sealed class Controller
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         if (settings.ShowDock) host.Show();
         refreshTimer.Start(); uiTimer.Start();
-        log.Write("info", "app", "start", Program.AppName + " 0.2.0-preview.1 started");
+        log.Write("info", "app", "start", Program.AppName + " 0.2.0-preview.2 started");
         if (showDetails) ShowDetails();
         else if (showPopover) popover.OpenAt(Anchor(), true);
         _ = Refresh();
@@ -265,22 +273,22 @@ internal sealed class Controller
                         await probeSlots.WaitAsync(stop.Token);
                         acquired = true;
                         var target = targets[state.Id];
-                        var reading = target.Supported ? await DeviceReader.RunTargetIsolated(target, stop.Token) :
-                            new Reading(null, null, null, null, "HID " + target.HardwareId, "已识别型号；电量协议尚未适配",
-                                ChargingNote: "未向未知型号发送查询；可导出诊断包申请适配");
+                        var reading = await DeviceReader.RunTargetIsolated(target, stop.Token);
                         state.Apply(reading, DateTimeOffset.UtcNow);
                         var missed = !state.LastReadSucceeded;
                         misses[state.Id] = missed ? misses.GetValueOrDefault(state.Id) + 1 : 0;
                         if (missed && misses[state.Id] >= 3) nextRead[state.Id] = DateTimeOffset.UtcNow.AddSeconds(120);
                         else nextRead.Remove(state.Id);
-                        log.Write("info", state.Id, "read",
-                            $"{state.PercentText}; {state.Connection}; {state.Status}; charging={state.Charging?.ToString() ?? "unknown"}; {state.ChargingNote}; {state.DpiText}");
+                        log.Write(reading.Failure == ReadFailure.AccessDenied ? "error" : "info", state.Id, "read",
+                            $"{target.HardwareId}; Win32={reading.ErrorCode}; {state.PercentText}; {state.Connection}; {state.Status}; charging={state.Charging?.ToString() ?? "unknown"}; {state.ChargingNote}; {state.DpiText}");
                     }
                     catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
                     catch (Exception ex)
                     {
                         var reason = ex is OperationCanceledException ? "设备查询超时" : Diagnostics.Redact(ex.Message);
-                        state.Apply(new(null, null, null, null, state.Source, reason), DateTimeOffset.UtcNow);
+                        state.Apply(new(null, null, null, null, state.Source, reason,
+                            Connection: state.Connection == "识别中" ? targets[state.Id].Connection : state.Connection,
+                            Failure: ReadFailure.ReadError), DateTimeOffset.UtcNow);
                         misses[state.Id] = misses.GetValueOrDefault(state.Id) + 1;
                         nextRead[state.Id] = DateTimeOffset.UtcNow.AddSeconds(misses[state.Id] >= 3 ? 120 : 30);
                         errors.Add(state.ShortName);
@@ -292,6 +300,7 @@ internal sealed class Controller
             await Task.WhenAll(jobs);
             if (Exiting) return;
             message = States.Count == 0 ? "未发现 ROG / Razer 外设" : errors.Count > 0 ? "读取异常 · 已记录日志" :
+                States.Any(s => s.Failure == ReadFailure.AccessDenied) ? "访问被拒绝 · 可选择管理员重启" :
                 States.Any(s => !s.LastReadSucceeded) ? "部分设备未响应" :
                 States.Any(s => s.Cached) ? "部分电量为系统缓存" : "暂无错误";
             var path = Path.Combine(root, "data", "status.json");
@@ -299,12 +308,19 @@ internal sealed class Controller
             await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(States, new JsonSerializerOptions { WriteIndented = true }));
             File.Move(temp, path, true);
         }
-        catch (Exception ex) when (!Exiting) { log.Write("error", "app", "refresh", ex.Message, ex); message = "更新异常 · 已记录日志"; }
+        catch (Exception ex) when (!Exiting)
+        {
+            foreach (var state in States)
+                state.Apply(new(null, null, null, null, state.Source, "设备发现失败；本次读数无效",
+                    Connection: state.Connection, Failure: ReadFailure.ReadError), DateTimeOffset.UtcNow);
+            log.Write("error", "app", "refresh", ex.Message, ex); message = "更新异常 · 已记录日志";
+        }
         finally { refreshing = false; if (!Exiting) UpdateViews(); }
     }
     void UpdateViews()
     {
         if (Exiting) return;
+        elevationOption.Enabled = !Elevation.IsElevated && States.Any(s => s.Failure == ReadFailure.AccessDenied);
         host.Update(States); popover.Update(States, refreshing); details.Update(States, refreshing, message);
         var summary = string.Join(" · ", States.Select(s => s.Name + " " + s.PercentText));
         tray.Text = summary.Length == 0 ? Program.AppName + " · 未发现外设" : summary.Length < 63 ? summary : summary[..60] + "…";
@@ -313,6 +329,20 @@ internal sealed class Controller
     {
         try { Directory.CreateDirectory(log.LogFolder); Process.Start(new ProcessStartInfo(log.LogFolder) { UseShellExecute = true }); }
         catch (Exception ex) { log.Write("error", "app", "open-logs", ex.Message, ex); }
+    }
+    void RestartElevated()
+    {
+        if (Elevation.IsElevated || !States.Any(s => s.Failure == ReadFailure.AccessDenied)) return;
+        try
+        {
+            if (Elevation.Start(Environment.ProcessPath!, Environment.ProcessId)) Exit();
+        }
+        catch (Exception ex)
+        {
+            log.Write("error", "app", "restart-elevated", ex.Message, ex);
+            message = "管理员重启失败 · 当前实例继续运行";
+            UpdateViews();
+        }
     }
     internal void Export()
     {

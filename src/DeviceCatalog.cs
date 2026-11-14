@@ -8,7 +8,7 @@ internal sealed record DeviceProfile(ushort Vendor, ushort Product, string Name,
     string Connection = "待确认", byte Transaction = 0x1f, int Scale = 1, int BatteryOffset = 6);
 
 internal sealed record DeviceTarget(string Id, string Name, string Kind, bool Supported,
-    string? BluetoothId = null, bool LowEnergy = false, string HardwareId = "")
+    string? BluetoothId = null, bool LowEnergy = false, string HardwareId = "", string Connection = "待确认")
 {
     [JsonIgnore] public HidDevice[] Interfaces { get; init; } = [];
 }
@@ -23,6 +23,7 @@ internal static class DeviceCatalog
 
     internal static int? RazerInterface(ushort product) => product switch
     {
+        0x00c0 => 0,
         0x025a or 0x025c or 0x0290 or 0x0296 or 0x02d5 => 2,
         0x0292 or 0x0298 or 0x02d7 or 0x0271 or 0x0258 or 0x02ba or 0x02b9 => 3,
         _ => null
@@ -39,7 +40,8 @@ internal static class DeviceCatalog
                 var profile = Find(first.Vendor, first.Product);
                 var name = profile?.Name ?? (first.Name.Length > 0 ? first.Name : $"外设 {first.Vendor:x4}:{first.Product:x4}");
                 return new DeviceTarget("hid-" + Key(group.Key), name, profile?.Kind ?? Kind(name),
-                    profile is not null && profile.Reader != "Unsupported", HardwareId: $"{first.Vendor:x4}:{first.Product:x4}") { Interfaces = group.ToArray() };
+                    profile is not null && profile.Reader != "Unsupported", HardwareId: $"{first.Vendor:x4}:{first.Product:x4}",
+                    Connection: profile?.Connection ?? "待确认") { Interfaces = group.ToArray() };
             }).OrderBy(t => t.Kind == "keyboard" ? 0 : t.Kind == "mouse" ? 1 : 2).ThenBy(t => t.Name).ToList();
     }
 

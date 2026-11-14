@@ -12,7 +12,7 @@
     <Product>Peripheral Battery</Product>
     <Title>Peripheral Battery</Title>
     <Description>Peripheral battery levels and mouse DPI</Description>
-    <Version>0.2.0-preview.1</Version>
+    <Version>0.2.0-preview.2</Version>
     <StartupObject>PeriDock.Program</StartupObject>
     <ApplicationIcon>..\assets\peridock.ico</ApplicationIcon>
   </PropertyGroup>
@@ -20,6 +20,7 @@
     <Compile Remove="tests\**" />
     <Compile Remove="ui-checks\**" />
     <InternalsVisibleTo Include="PeriDock.UiChecks"/>
+    <InternalsVisibleTo Include="PeriDock.Tests"/>
     <Content Include="..\assets\**\*.png;..\assets\**\*.ico;..\assets\**\*.svg">
       <Link>assets\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

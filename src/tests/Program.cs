@@ -2,6 +2,8 @@ using PeriDock;
 using System.IO.Compression;
 using System.Text.Json;
 using Microsoft.Win32;
+using System.ComponentModel;
+using System.Diagnostics;
 
 var failures = new List<string>();
 var checks = 0;
@@ -384,6 +386,172 @@ Check("Bluetooth model suffixes classify correctly and serialized discovery excl
     var json = JsonSerializer.Serialize(DeviceCatalog.FromHid([device]));
     Equal(false, json.Contains("private-"));
     Equal(true, json.Contains("1532:00c1"));
+});
+Check("access denied hides previous battery from every percentage consumer", () =>
+{
+    var state = new BatteryState("mouse", "Mouse", "Mouse");
+    var now = DateTimeOffset.UtcNow;
+    state.Apply(new(58, true, 1600, 1600, "HID", "已连接", Connection: "USB", Connected: true), now);
+    var denied = JsonSerializer.Deserialize<Reading>("""
+        {"Percent":null,"Charging":null,"DpiX":null,"DpiY":null,"Source":"HID 1532:00c0",
+         "Status":"已识别设备；访问被拒绝（Windows 错误 5）","Connection":"USB","Failure":1,"ErrorCode":5}
+        """)!;
+    state.Apply(denied, now.AddSeconds(30));
+    Equal("--", state.PercentText);
+    Equal<int?>(null, state.Percent);
+    Equal("USB", state.Connection);
+    Equal(false, state.LastReadSucceeded);
+    Equal<bool?>(null, state.Charging);
+    Equal("未知", state.DpiText);
+    Equal(now, state.LastSuccess);
+});
+Check("denied HID metadata retains the same physical identity and safe hardware diagnostics", () =>
+{
+    var root = Path.Combine(Path.GetTempPath(), "PeriDock-access-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        var log = new Diagnostics(root);
+        var path = @"\\?\HID#VID_1532&PID_00C0&MI_00#private-serial";
+        var device = NativeDevices.InspectHidInterface(path, 0x1532, "Mouse", "private-container",
+            () => throw new Win32Exception(5, @"Denied C:\Users\Someone\secret " + path), log)!;
+        Equal<ushort>(0x00c0, device.Product);
+        Equal<int?>(5, device.AccessError);
+        var target = DeviceCatalog.FromHid([device]).Single();
+        var readable = device with { AccessError = null, FeatureBytes = 91 };
+        Equal(DeviceCatalog.FromHid([readable]).Single().Id, target.Id);
+        Equal("USB", target.Connection);
+        var calls = 0;
+        var reading = DeviceReader.ReadHidTarget(target, (_, _) => { calls++; throw new Exception("Must not query denied metadata"); }).GetAwaiter().GetResult();
+        Equal(0, calls);
+        Equal(ReadFailure.AccessDenied, reading.Failure);
+        Equal<int?>(5, reading.ErrorCode);
+        Equal("USB", reading.Connection);
+        Equal(false, reading.Connected == false);
+        var json = JsonSerializer.Serialize(target);
+        Equal(false, json.Contains("private-"));
+        foreach (var file in Directory.GetFiles(log.LogFolder))
+        {
+            using var entry = JsonDocument.Parse(File.ReadAllText(file));
+            Equal(5, entry.RootElement.GetProperty("nativeError").GetInt32());
+            var message = entry.RootElement.GetProperty("message").GetString()!;
+            Equal(true, message.Contains("VID=1532") && message.Contains("PID=00c0"));
+            Equal(false, File.ReadAllText(file).Contains("private-serial"));
+            Equal(false, File.ReadAllText(file).Contains("Someone"));
+        }
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+});
+Check("read access denial survives isolated JSON and preserves USB or receiver transport", () =>
+{
+    foreach (var (product, connection) in new (ushort, string)[] { (0x00c0, "USB"), (0x00c1, "2.4G"), (0x0577, "2.4G") })
+    {
+        var target = DeviceCatalog.FromHid([new HidDevice("controlled", product, 0xff00, 1, 64, 64, 91)]).Single();
+        foreach (var error in new Exception[] { new Win32Exception(5, "controlled access denial"), new UnauthorizedAccessException("controlled denial") })
+        {
+            var result = DeviceReader.ReadHidTarget(target, (_, _) => throw error).GetAwaiter().GetResult();
+            var restored = JsonSerializer.Deserialize<Reading>(JsonSerializer.Serialize(result))!;
+            Equal(ReadFailure.AccessDenied, restored.Failure);
+            Equal<int?>(5, restored.ErrorCode);
+            Equal(connection, restored.Connection);
+            Equal<int?>(null, restored.Percent);
+            Equal<bool?>(null, restored.Connected);
+        }
+    }
+});
+Check("working collection wins over an inaccessible sibling and known denial wins over generic failure", () =>
+{
+    var accessible = new HidDevice("good", 0x00c0, 1, 2, 0, 0, 91, Container: "same-device");
+    var denied = accessible with { Path = "denied", AccessError = 5, FeatureBytes = 0 };
+    var target = DeviceCatalog.FromHid([denied, accessible]).Single();
+    var live = DeviceReader.ReadHidTarget(target, (interfaces, _) =>
+    {
+        Equal(1, interfaces.Length);
+        Equal("good", interfaces[0].Path);
+        return Task.FromResult(new Reading(50, true, 1600, 1600, "HID", "已连接", Connection: "USB", Connected: true));
+    }).GetAwaiter().GetResult();
+    Equal<int?>(50, live.Percent);
+    Equal(ReadFailure.None, live.Failure);
+    var failed = DeviceReader.ReadHidTarget(target, (_, _) => throw new IOException("generic failure")).GetAwaiter().GetResult();
+    Equal(ReadFailure.AccessDenied, failed.Failure);
+    Equal<int?>(5, failed.ErrorCode);
+});
+Check("unsupported protocols and missing collections remain visible without sending guessed commands", () =>
+{
+    var unknown = DeviceCatalog.FromHid([new HidDevice("unknown", 0xffff, 1, 2, 0, 0, 91)]).Single();
+    var calls = 0;
+    var unsupported = DeviceReader.ReadHidTarget(unknown, (_, _) => { calls++; throw new Exception("Unexpected query"); }).GetAwaiter().GetResult();
+    Equal(0, calls);
+    Equal(ReadFailure.ProtocolUnsupported, unsupported.Failure);
+    Equal(false, unsupported.Connected == false);
+    var noFeature = DeviceCatalog.FromHid([new HidDevice("no-feature", 0x00c0, 1, 2, 0, 0, 0)]).Single();
+    var missing = DeviceReader.ReadHidTarget(noFeature).GetAwaiter().GetResult();
+    Equal(ReadFailure.ProtocolUnsupported, missing.Failure);
+    Equal("USB", missing.Connection);
+    Equal(false, missing.Connected == false);
+});
+Check("other native failures keep their error code and transport without requesting elevation", () =>
+{
+    var device = new HidDevice("controlled", 0x00c0, 1, 2, 0, 0, 91);
+    var target = DeviceCatalog.FromHid([device]).Single();
+    var result = DeviceReader.ReadHidTarget(target, (_, _) => throw new Win32Exception(32, "controlled sharing violation")).GetAwaiter().GetResult();
+    Equal(ReadFailure.ReadError, result.Failure);
+    Equal<int?>(32, result.ErrorCode);
+    Equal("USB", result.Connection);
+    Equal<int?>(31, Diagnostics.NativeError(new IOException("controlled I/O error", unchecked((int)0x8007001f))));
+    Equal<int?>(null, Diagnostics.NativeError(new InvalidOperationException("not a Win32 HRESULT")));
+});
+Check("fresh USB, receiver and Bluetooth readings recover after denial and preserve cache semantics", () =>
+{
+    foreach (var connection in new[] { "USB", "2.4G", "蓝牙" })
+    {
+        var state = new BatteryState("controlled", "Device", "Device");
+        var now = DateTimeOffset.UtcNow;
+        state.Apply(new(null, null, null, null, "HID", "Denied", Connection: connection,
+            Failure: ReadFailure.AccessDenied, ErrorCode: 5), now);
+        state.Apply(new(40, connection == "蓝牙" ? null : true, 1600, 1600, "Fixture", "已连接", Connection: connection, Connected: true), now.AddSeconds(1));
+        Equal("40%", state.PercentText);
+        Equal(connection, state.Connection);
+        Equal(ReadFailure.None, state.Failure);
+        Equal<int?>(null, state.ErrorCode);
+        Equal(true, state.LastReadSucceeded);
+        state.Apply(new(39, true, 1600, 1600, "Windows cache", "缓存", Cached: true, Connection: connection, Connected: true), now.AddSeconds(2));
+        Equal(false, state.LastReadSucceeded);
+        Equal<bool?>(null, state.Charging);
+        Equal("未知", state.DpiText);
+        Equal(now.AddSeconds(1), state.LastSuccess);
+    }
+});
+Check("a failed query without a static transport keeps the last known connection", () =>
+{
+    var state = new BatteryState("keyboard", "ROG", "ROG");
+    var now = DateTimeOffset.UtcNow;
+    state.Apply(new(75, false, null, null, "ROG HID", "已连接", Connection: "USB", Connected: true), now);
+    state.Apply(new(null, null, null, null, "ROG HID", "访问被拒绝", Failure: ReadFailure.AccessDenied, ErrorCode: 5), now.AddSeconds(1));
+    Equal("USB", state.Connection);
+    Equal<bool?>(null, state.Connected);
+    Equal("--", state.PercentText);
+    state.Apply(new(null, null, null, null, "HID", "已移除", Connection: "未连接", Connected: false), now.AddSeconds(2));
+    Equal("未连接", state.Connection);
+});
+Check("elevation is explicit, uses the current executable and treats UAC cancellation as no restart", () =>
+{
+    ProcessStartInfo? info = null;
+    var started = Elevation.Start(@"D:\Controlled App\PeriDock.exe", 123, value => { info = value; return new Process(); });
+    Equal(true, started);
+    Equal("runas", info!.Verb);
+    Equal(true, info.UseShellExecute);
+    Equal(@"D:\Controlled App\PeriDock.exe", info.FileName);
+    Equal("--wait-for-exit", info.ArgumentList[0]);
+    Equal("123", info.ArgumentList[1]);
+    Equal(false, Elevation.Start("controlled", 123, _ => throw new Win32Exception(1223)));
+    Equal(false, Elevation.Start("controlled", 123, _ => null));
+    var raised = false;
+    try { Elevation.Start("controlled", 123, _ => throw new Win32Exception(2)); }
+    catch (Win32Exception ex) { raised = ex.NativeErrorCode == 2; }
+    Equal(true, raised);
+    Equal(false, Elevation.WaitForParent("invalid"));
+    Equal(false, Elevation.WaitForParent("-1"));
+    Equal(false, Elevation.WaitForParent(Environment.ProcessId.ToString()));
 });
 Console.WriteLine($"{checks - failures.Count}/{checks} checks passed");
 if (failures.Count == 0 && args.Length == 2 && args[0] == "--catalog")

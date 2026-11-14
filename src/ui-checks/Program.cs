@@ -34,13 +34,16 @@ internal static class UiChecks
                 value.TryGetProperty("Cached", out var cached) && cached.GetBoolean(),
                 value.TryGetProperty("Connection", out var connection) ? connection.GetString()! : "待确认",
                 value.TryGetProperty("Connected", out var connected) && connected.ValueKind != JsonValueKind.Null ? connected.GetBoolean() : null,
-                value.TryGetProperty("ChargingNote", out var note) ? note.GetString() : null), DateTimeOffset.Now);
+                value.TryGetProperty("ChargingNote", out var note) ? note.GetString() : null,
+                value.TryGetProperty("Failure", out var failure) ? (ReadFailure)failure.GetInt32() : ReadFailure.None,
+                value.TryGetProperty("ErrorCode", out var error) && error.ValueKind != JsonValueKind.Null ? error.GetInt32() : null), DateTimeOffset.Now);
         }
         var windows = new List<(string Name, Window Window)>();
         void AddWindows(string suffix)
         {
             var details = new DetailWindow(controller);
-            details.Update(controller.States, false, "暂无错误");
+            details.Update(controller.States, false, controller.States.Any(s => s.Failure == ReadFailure.AccessDenied)
+                ? "访问被拒绝 · 可选择管理员重启" : "暂无错误");
             windows.Add(("PeriDock-details" + suffix, details));
             var popover = new Popover(controller);
             popover.Update(controller.States, false);
@@ -68,6 +71,19 @@ internal static class UiChecks
             state.Apply(new Reading(100, false, 1600, 1600, state.Source, "已连接",
                 Connection: state.Connection, Connected: true), DateTimeOffset.Now);
         AddWindows("-full-test");
+        foreach (var state in controller.States)
+            state.Apply(new(null, null, null, null, state.Source, "已识别设备；访问被拒绝（Windows 错误 5）",
+                Connection: state.Kind == "keyboard" ? "蓝牙" : state.Kind == "mouse" ? "USB" : "2.4G",
+                ChargingNote: "可在设置菜单选择以管理员权限重启；拒绝访问不等于厂商软件占用",
+                Failure: ReadFailure.AccessDenied, ErrorCode: 5), DateTimeOffset.Now);
+        if (controller.States.Any(s => s.PercentText != "--" || Visuals.StateText(s) != "访问被拒绝" || s.Connected == false))
+            failures.Add("permission failure exposes stale battery or claims disconnection");
+        AddWindows("-denied-test");
+        foreach (var state in controller.States)
+            state.Apply(new(null, null, null, null, state.Source, "已识别型号；电量协议尚未适配",
+                Connection: state.Connection, Failure: ReadFailure.ProtocolUnsupported), DateTimeOffset.Now);
+        if (controller.States.Any(s => Visuals.StateText(s) != "协议未适配")) failures.Add("unsupported protocols are not identified");
+        AddWindows("-unsupported-test");
         foreach (var state in controller.States)
             state.Apply(new Reading(null, null, null, null, state.Source, "未连接",
                 Connection: "未连接", Connected: false), DateTimeOffset.Now);

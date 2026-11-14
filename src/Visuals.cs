@@ -107,7 +107,8 @@ internal static class Visuals
     internal static Brush StateBrush(BatteryState state) => state.IsStale(DateTimeOffset.UtcNow) ? Muted :
         state.Charging == true || state.Percent <= 25 ? Amber : Green;
 
-    internal static string StateText(BatteryState state) => state.IsStale(DateTimeOffset.UtcNow)
+    internal static string StateText(BatteryState state) => state.Failure == ReadFailure.AccessDenied ? "访问被拒绝" :
+        state.Failure == ReadFailure.ProtocolUnsupported ? "协议未适配" : state.IsStale(DateTimeOffset.UtcNow)
         ? state.Cached ? "缓存" : state.Connected == false ? "未连接" : "未更新"
         : state.Charging == true ? "充电中" : state.Charging == false ? "正常" : "充电未知";
 

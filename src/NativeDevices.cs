@@ -1,13 +1,14 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Win32.SafeHandles;
 
 namespace PeriDock;
 
 internal record HidDevice(string Path, ushort Product, ushort UsagePage, ushort Usage,
     ushort InputBytes, ushort OutputBytes, ushort FeatureBytes, ushort Vendor = 0x1532,
-    string Name = "", string Container = "");
+    string Name = "", string Container = "", int? AccessError = null);
 
 internal static class NativeDevices
 {
@@ -49,9 +50,9 @@ internal static class NativeDevices
     }
 
     [DllImport("hid.dll")] static extern void HidD_GetHidGuid(out Guid guid);
-    [DllImport("hid.dll")] static extern bool HidD_GetAttributes(SafeFileHandle handle, ref Attributes attributes);
+    [DllImport("hid.dll", SetLastError = true)] static extern bool HidD_GetAttributes(SafeFileHandle handle, ref Attributes attributes);
     [DllImport("hid.dll", CharSet = CharSet.Unicode)] static extern bool HidD_GetProductString(SafeFileHandle handle, StringBuilder value, int length);
-    [DllImport("hid.dll")] static extern bool HidD_GetPreparsedData(SafeFileHandle handle, out IntPtr data);
+    [DllImport("hid.dll", SetLastError = true)] static extern bool HidD_GetPreparsedData(SafeFileHandle handle, out IntPtr data);
     [DllImport("hid.dll")] static extern bool HidD_FreePreparsedData(IntPtr data);
     [DllImport("hid.dll")] static extern int HidP_GetCaps(IntPtr data, out Caps caps);
     [DllImport("hid.dll", SetLastError = true)] internal static extern bool HidD_SetFeature(SafeFileHandle handle, byte[] data, int length);
@@ -111,31 +112,54 @@ internal static class NativeDevices
                     if (!SetupDiGetDeviceInterfaceDetailW(set, ref info, detail, needed, out _, ref deviceInfo)) continue;
                     var path = Marshal.PtrToStringUni(detail + 4) ?? "";
                     if (!path.Contains($"vid_{vendor:x4}", StringComparison.OrdinalIgnoreCase)) continue;
-                    using var handle = Open(path, metadataOnly: true);
-                    var attrs = new Attributes { Size = (uint)Marshal.SizeOf<Attributes>() };
-                    if (!HidD_GetAttributes(handle, ref attrs) || attrs.Vendor != vendor) continue;
-                    var productName = new StringBuilder(256);
-                    HidD_GetProductString(handle, productName, productName.Capacity * 2);
                     var containerKey = new PropertyKey(new Guid("8c7ed206-3f8a-4827-b3ab-ae9e1faefc6c"), 2);
                     var containerBytes = new byte[16];
                     var container = SetupDiGetDevicePropertyW(set, ref deviceInfo, ref containerKey, out var containerType,
                         containerBytes, 16, out var containerSize, 0) && containerType == 13 && containerSize == 16
                         ? new Guid(containerBytes).ToString("N") : "";
-                    if (!HidD_GetPreparsedData(handle, out var pp)) continue;
-                    try
+                    var nameBytes = new byte[2048];
+                    var name = SetupDiGetDeviceRegistryPropertyW(set, ref deviceInfo, 0, out _, nameBytes,
+                        (uint)nameBytes.Length, out _) ? Encoding.Unicode.GetString(nameBytes).TrimEnd('\0') : "";
+                    var device = InspectHidInterface(path, vendor, name, container, () =>
                     {
-                        if (HidP_GetCaps(pp, out var caps) >= 0)
-                            result.Add(new(path, attrs.Product, caps.UsagePage, caps.Usage,
-                                caps.InputBytes, caps.OutputBytes, caps.FeatureBytes, vendor, productName.ToString().Trim(), container));
-                    }
-                    finally { HidD_FreePreparsedData(pp); }
+                        using var handle = Open(path, metadataOnly: true);
+                        var attrs = new Attributes { Size = (uint)Marshal.SizeOf<Attributes>() };
+                        if (!HidD_GetAttributes(handle, ref attrs)) throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取 HID 标识");
+                        if (attrs.Vendor != vendor) return null;
+                        var productName = new StringBuilder(256);
+                        HidD_GetProductString(handle, productName, productName.Capacity * 2);
+                        if (!HidD_GetPreparsedData(handle, out var pp)) throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取 HID 接口能力");
+                        try
+                        {
+                            return HidP_GetCaps(pp, out var caps) >= 0 ? new HidDevice(path, attrs.Product, caps.UsagePage, caps.Usage,
+                                caps.InputBytes, caps.OutputBytes, caps.FeatureBytes, vendor,
+                                productName.Length > 0 ? productName.ToString().Trim() : name, container) : null;
+                        }
+                        finally { HidD_FreePreparsedData(pp); }
+                    }, new Diagnostics(AppContext.BaseDirectory));
+                    if (device is not null) result.Add(device);
                 }
-                catch (Win32Exception) { }
                 finally { Marshal.FreeHGlobal(detail); }
             }
         }
         finally { SetupDiDestroyDeviceInfoList(set); }
         return result;
+    }
+
+    internal static HidDevice? InspectHidInterface(string path, ushort vendor, string name, string container,
+        Func<HidDevice?> inspect, Diagnostics log)
+    {
+        try { return inspect(); }
+        catch (Win32Exception ex)
+        {
+            // SetupAPI identity remains available even when Windows denies the HID handle.
+            var match = Regex.Match(path, $@"(?i)vid_{vendor:x4}&pid_([0-9a-f]{{4}})(?:[&#\\]|$)");
+            if (!match.Success) throw;
+            var product = Convert.ToUInt16(match.Groups[1].Value, 16);
+            var device = new HidDevice(path, product, 0, 0, 0, 0, 0, vendor, name, container, ex.NativeErrorCode);
+            log.HidFailure(device, "enumerate", ex);
+            return device;
+        }
     }
 
     internal static int? KeyboardWindowsBattery(string expectedName = "AZOTH X")

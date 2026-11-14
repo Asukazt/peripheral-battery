@@ -84,7 +84,7 @@ internal sealed class DeviceRow
         fill.Background = stale ? Muted : state.Percent <= 25 ? Amber : Green;
         extra.Text = state.Connection +
             (state.Kind == "mouse" ? " · " + state.DpiText + (state.DpiText == "未知" ? " DPI" : "") : "") +
-            (compact && state.Charging == true ? " · 充电中" : "");
+            (compact ? " · " + StateText(state) : "");
         var icon = state.Connection == "蓝牙" ? "bluetooth" :
             state.Connection == "USB" ? "usb" : state.Connection.Contains("2.4G") ? "radio-tower" : "ellipsis";
         connectionIcon.Source = IconSource(icon, state.Connection == "蓝牙" ? Brush("#6EA7DC") : Muted);

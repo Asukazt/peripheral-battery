@@ -55,7 +55,12 @@ internal static partial class DeviceReader
 
     static async Task<Reading> ReadKeyboard()
     {
-        var hid = await ReadKeyboardHid();
+        (Reading? Value, string? Issue) hid;
+        try { hid = await ReadKeyboardHid(); }
+        catch (Exception ex) when (Diagnostics.NativeError(ex) == 5)
+        {
+            hid = (null, "ROG HID 访问被拒绝（Windows 错误 5）");
+        }
         if (hid.Value is not null) return hid.Value;
         var cached = NativeDevices.KeyboardWindowsBattery();
         var devices = await DeviceInformation.FindAllAsync(BluetoothLEDevice.GetDeviceSelectorFromPairingState(true));
@@ -140,6 +145,7 @@ internal static partial class DeviceReader
              d.Product == 0x1ace && d.InputBytes == 64 && d.OutputBytes == 64))
             .OrderByDescending(d => d.Product == 0x1c24).ToList();
         string? issue = devices.Count > 0 && candidates.Count == 0 ? "发现 ROG 接口，状态待确认" : null;
+        Exception? denied = null;
         foreach (var device in candidates)
         {
             try
@@ -160,9 +166,12 @@ internal static partial class DeviceReader
             }
             catch (Exception ex) when (ex is IOException or Win32Exception or OperationCanceledException)
             {
+                new Diagnostics(AppContext.BaseDirectory).HidFailure(device, "keyboard-query", ex);
+                if (Diagnostics.NativeError(ex) == 5) denied = ex;
                 issue = ex is OperationCanceledException ? "ROG 状态查询超时" : Diagnostics.Redact(ex.Message);
             }
         }
+        if (denied is not null) throw denied;
         return (null, issue);
     }
 
@@ -195,8 +204,11 @@ internal static partial class DeviceReader
             .OrderByDescending(d => DeviceCatalog.RazerInterface(d.Product) is int index &&
                 d.Path.Contains($"mi_{index:x2}", StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(d => d.UsagePage == 0xff00).ToList();
-        if (devices.Count == 0) return new(null, null, null, null, "Razer HID", "未发现鼠标接口",
-            Connection: "未连接", Connected: false);
+        if (devices.Count == 0) return new(null, null, null, null, "Razer HID",
+            selected is null ? "未发现鼠标接口" : "已识别型号，但未找到可用的电量接口",
+            Connection: selected is null ? "未连接" : profile?.Connection ?? "待确认",
+            Connected: selected is null ? false : null,
+            Failure: selected is null ? ReadFailure.None : ReadFailure.ProtocolUnsupported);
         Exception? last = null;
         var disconnected = false;
         foreach (var device in devices)
@@ -219,19 +231,23 @@ internal static partial class DeviceReader
                     charging = value is 0 ? false : value is 1 ? true : null;
                 }
                 catch (IOException) { }
-                catch (Win32Exception) { }
+                catch (Win32Exception ex) { new Diagnostics(AppContext.BaseDirectory).HidFailure(device, "charging", ex); }
                 try
                 {
                     if (profile is null || profile.Kind == "mouse" && transaction == 0x1f)
                         dpi = Protocols.MouseDpi(MouseQuery(handle, 4, 0x85, 7, transaction), transaction);
                 }
                 catch (IOException) { }
-                catch (Win32Exception) { }
+                catch (Win32Exception ex) { new Diagnostics(AppContext.BaseDirectory).HidFailure(device, "dpi", ex); }
                 return new((int)Math.Round(battery.Value * 100d / 255), charging, dpi?.X, dpi?.Y,
                     "Razer HID · 电量 / DPI 读取", "已连接",
                     Connection: profile?.Connection ?? Protocols.RazerConnection(device.Product), Connected: true);
             }
-            catch (Exception ex) when (ex is IOException or Win32Exception) { last = ex; }
+            catch (Exception ex) when (ex is IOException or Win32Exception)
+            {
+                new Diagnostics(AppContext.BaseDirectory).HidFailure(device, "mouse-query", ex);
+                if (last is null || Diagnostics.NativeError(last) != 5) last = ex;
+            }
         }
         if (last is not null) throw last;
         return new(null, null, null, null, "Razer HID", disconnected ? "鼠标休眠或未连接" : "设备未响应",
