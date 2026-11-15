@@ -1,7 +1,5 @@
-using System.Runtime.Versioning;
 using System.IO;
 using System.Text.Json;
-using Microsoft.Win32;
 
 namespace PeriDock;
 
@@ -24,18 +22,5 @@ internal sealed record UserSettings(bool ShowDock = false, Dictionary<string, st
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         File.WriteAllText(file + ".tmp", JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
         File.Move(file + ".tmp", file, true);
-    }
-}
-
-[SupportedOSPlatform("windows")]
-internal static class StartupSettings
-{
-    internal const string KeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    internal static bool IsEnabled(RegistryKey? key, string executable)
-        => string.Equals(key?.GetValue("Peripheral Battery") as string, $"\"{executable}\" --startup", StringComparison.OrdinalIgnoreCase);
-    internal static void SetEnabled(RegistryKey key, string executable, bool enabled)
-    {
-        if (enabled) key.SetValue("Peripheral Battery", $"\"{executable}\" --startup", RegistryValueKind.String);
-        else key.DeleteValue("Peripheral Battery", false);
     }
 }

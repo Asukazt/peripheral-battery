@@ -23,6 +23,7 @@ void Equal<T>(T expected, T actual)
 
 MultiBrandTests.Run(Check);
 OfficialImageTests.Run(Check);
+StartupTests.Run(Check, args.Contains("--startup-integration"));
 Check("mouse battery request has the documented command and checksum", () =>
 {
     var p = Protocols.MouseRequest(0x07, 0x80, 2);
@@ -269,21 +270,18 @@ Check("invalid settings are kept for diagnosis and do not force the dock open", 
     }
     finally { Directory.Delete(root, true); }
 });
-Check("startup registration quotes paths and disabling preserves unrelated entries", () =>
+Check("legacy startup removal preserves other installations and unrelated entries", () =>
 {
-    if (!OperatingSystem.IsWindows()) return;
     var keyPath = @"Software\PeriDock-test-" + Guid.NewGuid().ToString("N");
     try
     {
         using var key = Registry.CurrentUser.CreateSubKey(keyPath);
         key.SetValue("Unrelated", "keep");
-        Equal(false, StartupSettings.IsEnabled(key, @"D:\Peripheral Battery\PeriDock.exe"));
-        StartupSettings.SetEnabled(key, @"D:\Peripheral Battery\PeriDock.exe", true);
-        Equal("\"D:\\Peripheral Battery\\PeriDock.exe\" --startup", key.GetValue("Peripheral Battery") as string);
-        Equal(true, StartupSettings.IsEnabled(key, @"D:\Peripheral Battery\PeriDock.exe"));
-        Equal(false, StartupSettings.IsEnabled(key, @"D:\Other\PeriDock.exe"));
-        StartupSettings.SetEnabled(key, @"D:\Peripheral Battery\PeriDock.exe", false);
-        Equal(false, StartupSettings.IsEnabled(key, @"D:\Peripheral Battery\PeriDock.exe"));
+        key.SetValue("Peripheral Battery", "\"D:\\Peripheral Battery\\PeriDock.exe\" --startup");
+        StartupSettings.RemoveLegacy(key, @"D:\Other\PeriDock.exe");
+        Equal(true, key.GetValue("Peripheral Battery") is not null);
+        StartupSettings.RemoveLegacy(key, @"D:\Peripheral Battery\PeriDock.exe");
+        Equal(true, key.GetValue("Peripheral Battery") is null);
         Equal("keep", key.GetValue("Unrelated") as string);
     }
     finally { Registry.CurrentUser.DeleteSubKeyTree(keyPath, false); }
@@ -536,26 +534,6 @@ Check("a failed query without a static transport keeps the last known connection
     Equal("--", state.PercentText);
     state.Apply(new(null, null, null, null, "HID", "已移除", Connection: "未连接", Connected: false), now.AddSeconds(2));
     Equal("未连接", state.Connection);
-});
-Check("elevation is explicit, uses the current executable and treats UAC cancellation as no restart", () =>
-{
-    ProcessStartInfo? info = null;
-    var started = Elevation.Start(@"D:\Controlled App\PeriDock.exe", 123, value => { info = value; return new Process(); });
-    Equal(true, started);
-    Equal("runas", info!.Verb);
-    Equal(true, info.UseShellExecute);
-    Equal(@"D:\Controlled App\PeriDock.exe", info.FileName);
-    Equal("--wait-for-exit", info.ArgumentList[0]);
-    Equal("123", info.ArgumentList[1]);
-    Equal(false, Elevation.Start("controlled", 123, _ => throw new Win32Exception(1223)));
-    Equal(false, Elevation.Start("controlled", 123, _ => null));
-    var raised = false;
-    try { Elevation.Start("controlled", 123, _ => throw new Win32Exception(2)); }
-    catch (Win32Exception ex) { raised = ex.NativeErrorCode == 2; }
-    Equal(true, raised);
-    Equal(false, Elevation.WaitForParent("invalid"));
-    Equal(false, Elevation.WaitForParent("-1"));
-    Equal(false, Elevation.WaitForParent(Environment.ProcessId.ToString()));
 });
 Check("official images match model and transport suffix without sending unknown names", () =>
 {

@@ -15,6 +15,18 @@ internal static class UiChecks
     [STAThread]
     static int Main(string[] args)
     {
+        if (args.FirstOrDefault() == "--startup-menu")
+        {
+            var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+            var menuController = new Controller(AppContext.BaseDirectory, new Diagnostics(AppContext.BaseDirectory));
+            menuController.Start(false, false);
+            var items = menuController.TrayMenu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>().ToArray();
+            var startup = items.SingleOrDefault(i => i.Text == "开机启动");
+            var ok = startup?.Enabled == true && !items.Any(i => i.Text!.Contains("管理员"));
+            Console.WriteLine(ok ? "PASS startup menu enabled; redundant elevation action absent" : "FAIL startup menu disabled or redundant elevation action present");
+            items.Last().PerformClick();
+            return ok ? 0 : 1;
+        }
         var output = Path.GetFullPath(args.ElementAtOrDefault(1) ?? Path.Combine(AppContext.BaseDirectory, "renders"));
         Directory.CreateDirectory(output);
         var controller = new Controller(AppContext.BaseDirectory, new Diagnostics(AppContext.BaseDirectory));
@@ -45,7 +57,7 @@ internal static class UiChecks
         {
             var details = new DetailWindow(controller);
             details.Update(controller.States, false, controller.States.Any(s => s.Failure == ReadFailure.AccessDenied)
-                ? "访问被拒绝 · 可选择管理员重启" : "暂无错误");
+                ? "访问被拒绝 · 请检查驱动或设备接口" : "暂无错误");
             windows.Add(("PeriDock-details" + suffix, details));
             var popover = new Popover(controller);
             popover.Update(controller.States, false);
@@ -177,7 +189,7 @@ internal static class UiChecks
         foreach (var state in controller.States)
             state.Apply(new(null, null, null, null, state.Source, "已识别设备；访问被拒绝（Windows 错误 5）",
                 Connection: state.Kind == "keyboard" ? "蓝牙" : state.Kind == "mouse" ? "USB" : "2.4G",
-                ChargingNote: "可在设置菜单选择以管理员权限重启；拒绝访问不等于厂商软件占用",
+                ChargingNote: "程序默认请求管理员权限；拒绝访问不等于厂商软件占用",
                 Failure: ReadFailure.AccessDenied, ErrorCode: 5), DateTimeOffset.Now);
         if (controller.States.Any(s => s.PercentText != "--" || Visuals.StateText(s) != "访问被拒绝" || s.Connected == false))
             failures.Add("permission failure exposes stale battery or claims disconnection");

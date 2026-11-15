@@ -16,11 +16,6 @@ internal static class Program
     {
         var root = AppContext.BaseDirectory;
         var log = new Diagnostics(root);
-        if (args.Length == 2 && args[0] == "--wait-for-exit")
-        {
-            if (!Elevation.IsElevated || !Elevation.WaitForParent(args[1])) return 1;
-            args = [];
-        }
         if (args.Length == 1 && args[0] is "--discover" or "--discover-known" or "--target-probe")
         {
             try
@@ -95,7 +90,7 @@ internal sealed class Controller
     Popover popover = null!;
     DetailWindow details = null!;
     Forms.NotifyIcon tray = null!;
-    Forms.ToolStripMenuItem dockOption = null!, startupOption = null!, elevationOption = null!;
+    Forms.ToolStripMenuItem dockOption = null!, startupOption = null!;
     UserSettings settings;
     bool refreshing;
     bool anchorFromTray;
@@ -120,10 +115,11 @@ internal sealed class Controller
         TrayMenu.Items.Add(dockOption);
         startupOption = new Forms.ToolStripMenuItem("开机启动");
         startupOption.Click += (_, _) => SetStartupEnabled(!startupOption.Checked);
-        // The preview must never replace the stable installation's startup registration.
-        startupOption.Enabled = false;
+        TrayMenu.Items.Add(startupOption);
         TrayMenu.Opening += (_, _) => UpdateStartupOption();
         UpdateStartupOption();
+        try { StartupSettings.MigrateLegacy(Path.Combine(root, "PeriDock.exe")); UpdateStartupOption(); }
+        catch (Exception ex) { log.Write("error", "app", "migrate-startup", ex.Message, ex); message = "开机启动迁移失败 · 请重新启用开机启动"; }
         TrayMenu.Items.Add("刷新电量", null, (_, _) => _ = Refresh());
         var appearances = new Forms.ToolStripMenuItem("设备图片与颜色");
         TrayMenu.Opening += (_, _) =>
@@ -133,9 +129,6 @@ internal sealed class Controller
         };
         TrayMenu.Items.Add(appearances);
         TrayMenu.Items.Add("打开日志", null, (_, _) => OpenLogs());
-        elevationOption = new Forms.ToolStripMenuItem("以管理员权限重启…") { Enabled = false };
-        elevationOption.Click += (_, _) => RestartElevated();
-        TrayMenu.Items.Add(elevationOption);
         TrayMenu.Items.Add(new Forms.ToolStripSeparator());
         TrayMenu.Items.Add("退出 " + Program.AppName, null, (_, _) => Exit());
         tray = new Forms.NotifyIcon
@@ -161,7 +154,7 @@ internal sealed class Controller
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         if (settings.ShowDock) host.Show();
         refreshTimer.Start(); uiTimer.Start();
-        log.Write("info", "app", "start", Program.AppName + " 0.2.0-preview.5-images.1 started");
+        log.Write("info", "app", "start", Program.AppName + " 0.2.0-preview.5-startup.1 started");
         if (showDetails) ShowDetails();
         else if (showPopover) popover.OpenAt(Anchor(), true);
         _ = Refresh();
@@ -184,8 +177,7 @@ internal sealed class Controller
     {
         try
         {
-            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(StartupSettings.KeyPath);
-            startupOption.Checked = StartupSettings.IsEnabled(key, Path.Combine(root, "PeriDock.exe"));
+            startupOption.Checked = StartupSettings.IsEnabled(Path.Combine(root, "PeriDock.exe"));
         }
         catch (Exception ex) { log.Write("error", "app", "read-startup", ex.Message, ex); }
     }
@@ -193,9 +185,8 @@ internal sealed class Controller
     {
         try
         {
-            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(StartupSettings.KeyPath);
-            StartupSettings.SetEnabled(key, Path.Combine(root, "PeriDock.exe"), enabled);
-            startupOption.Checked = StartupSettings.IsEnabled(key, Path.Combine(root, "PeriDock.exe"));
+            StartupSettings.SetEnabled(Path.Combine(root, "PeriDock.exe"), enabled);
+            UpdateStartupOption();
         }
         catch (Exception ex) { SettingsError("save-startup", ex); }
     }
@@ -315,7 +306,7 @@ internal sealed class Controller
             if (Exiting) return;
             message = States.Count == 0 ? "未发现受支持品牌的外设" : errors.Count > 0 ? "读取异常 · 已记录日志" :
                 States.Any(s => s.Failure == ReadFailure.AccessDenied) ?
-                    (Elevation.IsElevated ? "管理员权限下仍被拒绝 · 请检查驱动或设备接口" : "访问被拒绝 · 可选择管理员重启") :
+                    (Elevation.IsElevated ? "管理员权限下仍被拒绝 · 请检查驱动或设备接口" : "访问被拒绝 · 请使用管理员权限启动程序") :
                 States.Any(s => !s.LastReadSucceeded) ? "部分设备未响应" :
                 States.Any(s => s.Cached) ? "部分电量为系统缓存" : "暂无错误";
             var path = Path.Combine(root, "data", "status.json");
@@ -372,7 +363,6 @@ internal sealed class Controller
     void UpdateViews()
     {
         if (Exiting) return;
-        elevationOption.Enabled = !Elevation.IsElevated && States.Any(s => s.Failure == ReadFailure.AccessDenied);
         host.Update(States); popover.Update(States, refreshing); details.Update(States, refreshing, message);
         var summary = string.Join(" · ", States.Select(s => s.TrayText));
         tray.Text = summary.Length == 0 ? Program.AppName + " · 未发现外设" : summary.Length < 63 ? summary : summary[..60] + "…";
@@ -381,20 +371,6 @@ internal sealed class Controller
     {
         try { Directory.CreateDirectory(log.LogFolder); Process.Start(new ProcessStartInfo(log.LogFolder) { UseShellExecute = true }); }
         catch (Exception ex) { log.Write("error", "app", "open-logs", ex.Message, ex); }
-    }
-    void RestartElevated()
-    {
-        if (Elevation.IsElevated || !States.Any(s => s.Failure == ReadFailure.AccessDenied)) return;
-        try
-        {
-            if (Elevation.Start(Environment.ProcessPath!, Environment.ProcessId)) Exit();
-        }
-        catch (Exception ex)
-        {
-            log.Write("error", "app", "restart-elevated", ex.Message, ex);
-            message = "管理员重启失败 · 当前实例继续运行";
-            UpdateViews();
-        }
     }
     internal void Export()
     {

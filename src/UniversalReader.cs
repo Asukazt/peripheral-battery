@@ -140,7 +140,7 @@ internal static partial class DeviceReader
             denied ? "已识别设备；访问被拒绝（Windows 错误 5）" :
                 error is OperationCanceledException ? "已识别设备；查询超时" : "已识别设备；" + Diagnostics.Redact(error.Message),
             Connection: target.Connection,
-            ChargingNote: denied ? "可在设置菜单选择“以管理员权限重启”；拒绝访问不能证明是厂商软件占用" : null,
+            ChargingNote: denied ? "程序默认请求管理员权限；若仍被拒绝，请检查驱动或设备接口；拒绝访问不能证明是厂商软件占用" : null,
             Failure: denied ? ReadFailure.AccessDenied : ReadFailure.ReadError, ErrorCode: code);
     }
 
