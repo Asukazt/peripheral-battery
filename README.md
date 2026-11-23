@@ -6,6 +6,7 @@ Windows 外设电量小工具。集中查看鼠标、键盘、耳机电量，并
 
 - 多设备电量、连接方式和充电状态，支持托盘、悬浮条和详情页。
 - 每台已适配设备可单独设置 5–80% 低电量阈值，越过阈值时弹托盘提醒。
+- 按设备记录电量历史，统计今日放电、本次放电、平均耗电和预计剩余时间，支持 24 小时、7 天、30 天曲线。
 - 切换 Windows 输出/输入设备，调节音量和静音；系统静音不可用时自动切到 0 音量。
 - 自动识别已适配雷蛇鼠标并读写 DPI，写入后回读确认。
 - 旋风黑鲨 V3 Pro 支持主动降噪、环境感知和 1–4 级强度。
@@ -14,9 +15,9 @@ Windows 外设电量小工具。集中查看鼠标、键盘、耳机电量，并
 
 ## 下载
 
-最新版本：[v0.2.0-preview.6](https://github.com/Asukazt/peripheral-battery/releases/tag/v0.2.0-preview.6)
+最新版本：[v0.3.0](https://github.com/Asukazt/peripheral-battery/releases/tag/v0.3.0)
 
-运行包：`Peripheral-Battery-v0.2.0-preview.6-win-x64.zip`
+运行包：`Peripheral-Battery-v0.3.0-win-x64.zip`
 
 适用于 Windows 10 19041 及以上 / Windows 11，x64。自带 .NET，无需另装；解压后运行 `PeriDock.exe`，按提示确认管理员权限。
 
@@ -36,6 +37,6 @@ Windows 外设电量小工具。集中查看鼠标、键盘、耳机电量，并
 - [官网图片型号、配色与来源](docs/OFFICIAL-IMAGES.md)
 - [更新记录](docs/RELEASE-NOTES.md)
 
-设置、日志和设备图片只保存在本机，不自动上传。当前为未签名 Pre-release。
+设置、电量历史和设备图片只保存在本机，不自动上传。当前为未签名构建。
 
 本项目为非官方工具，与各厂商无隶属关系。原创代码采用 [MIT 许可](LICENSE)。

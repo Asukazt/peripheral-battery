@@ -1,3 +1,6 @@
+#nullable disable
+using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -6,186 +9,324 @@ using Microsoft.Win32.SafeHandles;
 
 namespace PeriDock;
 
-internal record HidDevice(string Path, ushort Product, ushort UsagePage, ushort Usage,
-    ushort InputBytes, ushort OutputBytes, ushort FeatureBytes, ushort Vendor = 0x1532,
-    string Name = "", string Container = "", int? AccessError = null);
-
 internal static class NativeDevices
 {
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct DeviceInfo
-    {
-        public uint Size;
-        public Guid ClassGuid;
-        public uint DevInst;
-        public IntPtr Reserved;
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    struct InterfaceInfo
-    {
-        public uint Size;
-        public Guid ClassGuid;
-        public uint Flags;
-        public IntPtr Reserved;
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    struct Attributes
-    {
-        public uint Size;
-        public ushort Vendor, Product, Version;
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    struct Caps
-    {
-        public ushort Usage, UsagePage, InputBytes, OutputBytes, FeatureBytes;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 17)] public ushort[] Reserved;
-        public ushort Links, InputButtons, InputValues, InputIndices, OutputButtons,
-            OutputValues, OutputIndices, FeatureButtons, FeatureValues, FeatureIndices;
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    struct PropertyKey(Guid format, uint id)
-    {
-        public Guid Format = format;
-        public uint Id = id;
-    }
+	internal struct DeviceInfo
+	{
+		public uint Size;
 
-    [DllImport("hid.dll")] static extern void HidD_GetHidGuid(out Guid guid);
-    [DllImport("hid.dll", SetLastError = true)] static extern bool HidD_GetAttributes(SafeFileHandle handle, ref Attributes attributes);
-    [DllImport("hid.dll", CharSet = CharSet.Unicode)] static extern bool HidD_GetProductString(SafeFileHandle handle, StringBuilder value, int length);
-    [DllImport("hid.dll", SetLastError = true)] static extern bool HidD_GetPreparsedData(SafeFileHandle handle, out IntPtr data);
-    [DllImport("hid.dll")] static extern bool HidD_FreePreparsedData(IntPtr data);
-    [DllImport("hid.dll")] static extern int HidP_GetCaps(IntPtr data, out Caps caps);
-    [DllImport("hid.dll", SetLastError = true)] internal static extern bool HidD_SetFeature(SafeFileHandle handle, byte[] data, int length);
-    [DllImport("hid.dll", SetLastError = true)] internal static extern bool HidD_GetFeature(SafeFileHandle handle, byte[] data, int length);
-    [DllImport("hid.dll", SetLastError = true)] internal static extern bool HidD_FlushQueue(SafeFileHandle handle);
-    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern IntPtr SetupDiGetClassDevsW(IntPtr guid, string? enumerator, IntPtr parent, uint flags);
-    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern IntPtr SetupDiGetClassDevsW(ref Guid guid, string? enumerator, IntPtr parent, uint flags);
-    [DllImport("setupapi.dll", SetLastError = true)]
-    static extern bool SetupDiEnumDeviceInterfaces(IntPtr set, IntPtr device, ref Guid guid, uint index, ref InterfaceInfo info);
-    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern bool SetupDiGetDeviceInterfaceDetailW(IntPtr set, ref InterfaceInfo info, IntPtr detail, uint length, out uint required, IntPtr device);
-    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern bool SetupDiGetDeviceInterfaceDetailW(IntPtr set, ref InterfaceInfo info, IntPtr detail, uint length, out uint required, ref DeviceInfo device);
-    [DllImport("setupapi.dll", SetLastError = true)] static extern bool SetupDiDestroyDeviceInfoList(IntPtr set);
-    [DllImport("setupapi.dll", SetLastError = true)] static extern bool SetupDiEnumDeviceInfo(IntPtr set, uint index, ref DeviceInfo info);
-    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern bool SetupDiGetDeviceRegistryPropertyW(IntPtr set, ref DeviceInfo info, uint property, out uint type, byte[] buffer, uint size, out uint required);
-    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern bool SetupDiGetDevicePropertyW(IntPtr set, ref DeviceInfo info, ref PropertyKey key, out uint type, byte[] buffer, uint size, out uint required, uint flags);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+		public Guid ClassGuid;
 
-    internal static SafeFileHandle Open(string path, bool overlapped = false, bool metadataOnly = false)
-    {
-        var handle = CreateFileW(path, metadataOnly ? 0 : 0xc0000000, 3, IntPtr.Zero, 3,
-            overlapped ? 0x40000000u : 0, IntPtr.Zero);
-        if (handle.IsInvalid)
-        {
-            var error = Marshal.GetLastWin32Error();
-            handle.Dispose();
-            throw new Win32Exception(error, "无法打开设备接口");
-        }
-        return handle;
-    }
+		public uint DevInst;
 
-    internal static List<HidDevice> EnumerateHid(ushort vendor = 0x1532)
-    {
-        HidD_GetHidGuid(out var guid);
-        var set = SetupDiGetClassDevsW(ref guid, null, IntPtr.Zero, 0x12);
-        if (set == new IntPtr(-1)) throw new Win32Exception();
-        var result = new List<HidDevice>();
-        try
-        {
-            for (uint index = 0; ; index++)
-            {
-                var info = new InterfaceInfo { Size = (uint)Marshal.SizeOf<InterfaceInfo>() };
-                if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref guid, index, ref info)) break;
-                SetupDiGetDeviceInterfaceDetailW(set, ref info, IntPtr.Zero, 0, out var needed, IntPtr.Zero);
-                if (needed < 8 || needed > 65536) continue;
-                var detail = Marshal.AllocHGlobal((int)needed);
-                try
-                {
-                    Marshal.WriteInt32(detail, IntPtr.Size == 8 ? 8 : 6);
-                    var deviceInfo = new DeviceInfo { Size = (uint)Marshal.SizeOf<DeviceInfo>() };
-                    if (!SetupDiGetDeviceInterfaceDetailW(set, ref info, detail, needed, out _, ref deviceInfo)) continue;
-                    var path = Marshal.PtrToStringUni(detail + 4) ?? "";
-                    var vidMatch = Regex.Match(path, @"(?i)vid_([0-9a-f]{4})&pid_");
-                    if (!vidMatch.Success) continue;
-                    var actualVendor = Convert.ToUInt16(vidMatch.Groups[1].Value, 16);
-                    if (vendor == 0 ? !DeviceCatalog.Vendors.Contains(actualVendor) : actualVendor != vendor) continue;
-                    var containerKey = new PropertyKey(new Guid("8c7ed206-3f8a-4827-b3ab-ae9e1faefc6c"), 2);
-                    var containerBytes = new byte[16];
-                    var container = SetupDiGetDevicePropertyW(set, ref deviceInfo, ref containerKey, out var containerType,
-                        containerBytes, 16, out var containerSize, 0) && containerType == 13 && containerSize == 16
-                        ? new Guid(containerBytes).ToString("N") : "";
-                    var nameBytes = new byte[2048];
-                    var name = SetupDiGetDeviceRegistryPropertyW(set, ref deviceInfo, 0, out _, nameBytes,
-                        (uint)nameBytes.Length, out _) ? Encoding.Unicode.GetString(nameBytes).TrimEnd('\0') : "";
-                    var device = InspectHidInterface(path, actualVendor, name, container, () =>
-                    {
-                        using var handle = Open(path, metadataOnly: true);
-                        var attrs = new Attributes { Size = (uint)Marshal.SizeOf<Attributes>() };
-                        if (!HidD_GetAttributes(handle, ref attrs)) throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取 HID 标识");
-                        if (attrs.Vendor != actualVendor) return null;
-                        var productName = new StringBuilder(256);
-                        HidD_GetProductString(handle, productName, productName.Capacity * 2);
-                        if (!HidD_GetPreparsedData(handle, out var pp)) throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取 HID 接口能力");
-                        try
-                        {
-                            return HidP_GetCaps(pp, out var caps) >= 0 ? new HidDevice(path, attrs.Product, caps.UsagePage, caps.Usage,
-                                caps.InputBytes, caps.OutputBytes, caps.FeatureBytes, actualVendor,
-                                productName.Length > 0 ? productName.ToString().Trim() : name, container) : null;
-                        }
-                        finally { HidD_FreePreparsedData(pp); }
-                    }, new Diagnostics(AppContext.BaseDirectory));
-                    if (device is not null) result.Add(device);
-                }
-                finally { Marshal.FreeHGlobal(detail); }
-            }
-        }
-        finally { SetupDiDestroyDeviceInfoList(set); }
-        return result;
-    }
+		public nint Reserved;
+	}
 
-    internal static HidDevice? InspectHidInterface(string path, ushort vendor, string name, string container,
-        Func<HidDevice?> inspect, Diagnostics log)
-    {
-        try { return inspect(); }
-        catch (Win32Exception ex)
-        {
-            // SetupAPI identity remains available even when Windows denies the HID handle.
-            var match = Regex.Match(path, $@"(?i)vid_{vendor:x4}&pid_([0-9a-f]{{4}})(?:[&#\\]|$)");
-            if (!match.Success) throw;
-            var product = Convert.ToUInt16(match.Groups[1].Value, 16);
-            var device = new HidDevice(path, product, 0, 0, 0, 0, 0, vendor, name, container, ex.NativeErrorCode);
-            log.HidFailure(device, "enumerate", ex);
-            return device;
-        }
-    }
+	private struct InterfaceInfo
+	{
+		public uint Size;
 
-    internal static int? KeyboardWindowsBattery(string expectedName = "AZOTH X")
-    {
-        var set = SetupDiGetClassDevsW(IntPtr.Zero, "BTHLE", IntPtr.Zero, 6);
-        if (set == new IntPtr(-1)) return null;
-        try
-        {
-            for (uint index = 0; ; index++)
-            {
-                var info = new DeviceInfo { Size = (uint)Marshal.SizeOf<DeviceInfo>() };
-                if (!SetupDiEnumDeviceInfo(set, index, ref info)) break;
-                var text = new byte[2048];
-                if (!SetupDiGetDeviceRegistryPropertyW(set, ref info, 12, out _, text, (uint)text.Length, out _)) continue;
-                var name = Encoding.Unicode.GetString(text).TrimEnd('\0');
-                if (!name.Contains(expectedName, StringComparison.OrdinalIgnoreCase)) continue;
-                var key = new PropertyKey(new Guid("104ea319-6ee2-4701-bd47-8ddbf425bbe5"), 2);
-                var bytes = new byte[8];
-                if (SetupDiGetDevicePropertyW(set, ref info, ref key, out var type, bytes, 8, out var size, 0)
-                    && size >= 1 && type is 3 or 7 && bytes[0] <= 100) return bytes[0];
-            }
-        }
-        finally { SetupDiDestroyDeviceInfoList(set); }
-        return null;
-    }
+		public Guid ClassGuid;
+
+		public uint Flags;
+
+		public nint Reserved;
+	}
+
+	private struct Attributes
+	{
+		public uint Size;
+
+		public ushort Vendor;
+
+		public ushort Product;
+
+		public ushort Version;
+	}
+
+	private struct Caps
+	{
+		public ushort Usage;
+
+		public ushort UsagePage;
+
+		public ushort InputBytes;
+
+		public ushort OutputBytes;
+
+		public ushort FeatureBytes;
+
+		[MarshalAs(UnmanagedType.ByValArray, SizeConst = 17)]
+		public ushort[] Reserved;
+
+		public ushort Links;
+
+		public ushort InputButtons;
+
+		public ushort InputValues;
+
+		public ushort InputIndices;
+
+		public ushort OutputButtons;
+
+		public ushort OutputValues;
+
+		public ushort OutputIndices;
+
+		public ushort FeatureButtons;
+
+		public ushort FeatureValues;
+
+		public ushort FeatureIndices;
+	}
+
+	private struct PropertyKey
+	{
+		public Guid Format;
+
+		public uint Id;
+
+		public PropertyKey(Guid format, uint id)
+		{
+			Format = format;
+			Id = id;
+		}
+	}
+
+	[DllImport("hid.dll")]
+	private static extern void HidD_GetHidGuid(out Guid guid);
+
+	[DllImport("hid.dll", SetLastError = true)]
+	private static extern bool HidD_GetAttributes(SafeFileHandle handle, ref Attributes attributes);
+
+	[DllImport("hid.dll", CharSet = CharSet.Unicode)]
+	private static extern bool HidD_GetProductString(SafeFileHandle handle, StringBuilder value, int length);
+
+	[DllImport("hid.dll", SetLastError = true)]
+	private static extern bool HidD_GetPreparsedData(SafeFileHandle handle, out nint data);
+
+	[DllImport("hid.dll")]
+	private static extern bool HidD_FreePreparsedData(nint data);
+
+	[DllImport("hid.dll")]
+	private static extern int HidP_GetCaps(nint data, out Caps caps);
+
+	[DllImport("hid.dll", SetLastError = true)]
+	internal static extern bool HidD_SetFeature(SafeFileHandle handle, byte[] data, int length);
+
+	[DllImport("hid.dll", SetLastError = true)]
+	internal static extern bool HidD_GetFeature(SafeFileHandle handle, byte[] data, int length);
+
+	[DllImport("hid.dll", SetLastError = true)]
+	internal static extern bool HidD_FlushQueue(SafeFileHandle handle);
+
+	[DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern nint SetupDiGetClassDevsW(nint guid, string? enumerator, nint parent, uint flags);
+
+	[DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern nint SetupDiGetClassDevsW(ref Guid guid, string? enumerator, nint parent, uint flags);
+
+	[DllImport("setupapi.dll", SetLastError = true)]
+	private static extern bool SetupDiEnumDeviceInterfaces(nint set, nint device, ref Guid guid, uint index, ref InterfaceInfo info);
+
+	[DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern bool SetupDiGetDeviceInterfaceDetailW(nint set, ref InterfaceInfo info, nint detail, uint length, out uint required, nint device);
+
+	[DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern bool SetupDiGetDeviceInterfaceDetailW(nint set, ref InterfaceInfo info, nint detail, uint length, out uint required, ref DeviceInfo device);
+
+	[DllImport("setupapi.dll", SetLastError = true)]
+	private static extern bool SetupDiDestroyDeviceInfoList(nint set);
+
+	[DllImport("setupapi.dll", SetLastError = true)]
+	private static extern bool SetupDiEnumDeviceInfo(nint set, uint index, ref DeviceInfo info);
+
+	[DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern bool SetupDiGetDeviceRegistryPropertyW(nint set, ref DeviceInfo info, uint property, out uint type, byte[] buffer, uint size, out uint required);
+
+	[DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern bool SetupDiGetDevicePropertyW(nint set, ref DeviceInfo info, ref PropertyKey key, out uint type, byte[] buffer, uint size, out uint required, uint flags);
+
+	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern SafeFileHandle CreateFileW(string path, uint access, uint share, nint security, uint creation, uint flags, nint template);
+
+	internal static SafeFileHandle Open(string path, bool overlapped = false, bool metadataOnly = false)
+	{
+		SafeFileHandle safeFileHandle = CreateFileW(path, (!metadataOnly) ? 3221225472u : 0u, 3u, IntPtr.Zero, 3u, overlapped ? 1073741824u : 0u, IntPtr.Zero);
+		if (safeFileHandle.IsInvalid)
+		{
+			int lastWin32Error = Marshal.GetLastWin32Error();
+			safeFileHandle.Dispose();
+			throw new Win32Exception(lastWin32Error, "无法打开设备接口");
+		}
+		return safeFileHandle;
+	}
+
+	internal static List<HidDevice> EnumerateHid(ushort vendor = 5426)
+	{
+		HidD_GetHidGuid(out var guid);
+		nint num = SetupDiGetClassDevsW(ref guid, null, IntPtr.Zero, 18u);
+		if (num == new IntPtr(-1))
+		{
+			throw new Win32Exception();
+		}
+		List<HidDevice> list = new List<HidDevice>();
+		try
+		{
+			uint num2 = 0u;
+			while (true)
+			{
+				InterfaceInfo interfaceInfo = default(InterfaceInfo);
+				interfaceInfo.Size = (uint)Marshal.SizeOf<InterfaceInfo>();
+				InterfaceInfo info = interfaceInfo;
+				if (!SetupDiEnumDeviceInterfaces(num, IntPtr.Zero, ref guid, num2, ref info))
+				{
+					break;
+				}
+				SetupDiGetDeviceInterfaceDetailW(num, ref info, IntPtr.Zero, 0u, out var required, IntPtr.Zero);
+				if (required >= 8 && required <= 65536)
+				{
+					nint num3 = Marshal.AllocHGlobal((int)required);
+					try
+					{
+						Marshal.WriteInt32(num3, (IntPtr.Size == 8) ? 8 : 6);
+						DeviceInfo deviceInfo = default(DeviceInfo);
+						deviceInfo.Size = (uint)Marshal.SizeOf<DeviceInfo>();
+						DeviceInfo device = deviceInfo;
+						if (SetupDiGetDeviceInterfaceDetailW(num, ref info, num3, required, out var required2, ref device))
+						{
+							string path = Marshal.PtrToStringUni(num3 + 4) ?? "";
+							Match match = Regex.Match(path, "(?i)vid_([0-9a-f]{4})&pid_");
+							if (match.Success)
+							{
+								ushort actualVendor = Convert.ToUInt16(match.Groups[1].Value, 16);
+								if (!((vendor == 0) ? (!DeviceCatalog.Vendors.Contains(actualVendor)) : (actualVendor != vendor)))
+								{
+									PropertyKey key = new PropertyKey(new Guid("8c7ed206-3f8a-4827-b3ab-ae9e1faefc6c"), 2u);
+									byte[] array = new byte[16];
+									uint type;
+									uint required3;
+									string container = ((SetupDiGetDevicePropertyW(num, ref device, ref key, out type, array, 16u, out required3, 0u) && type == 13 && required3 == 16) ? new Guid(array).ToString("N") : "");
+									byte[] array2 = new byte[2048];
+									uint required4;
+									string name = (SetupDiGetDeviceRegistryPropertyW(num, ref device, 0u, out required2, array2, (uint)array2.Length, out required4) ? Encoding.Unicode.GetString(array2).TrimEnd('\0') : "");
+									HidDevice hidDevice = InspectHidInterface(path, actualVendor, name, container, delegate
+									{
+										using SafeFileHandle handle = Open(path, overlapped: false, metadataOnly: true);
+										Attributes attributes = default(Attributes);
+										attributes.Size = (uint)Marshal.SizeOf<Attributes>();
+										Attributes attributes2 = attributes;
+										if (!HidD_GetAttributes(handle, ref attributes2))
+										{
+											throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取 HID 标识");
+										}
+										if (attributes2.Vendor == actualVendor)
+										{
+											StringBuilder stringBuilder = new StringBuilder(256);
+											HidD_GetProductString(handle, stringBuilder, stringBuilder.Capacity * 2);
+											if (!HidD_GetPreparsedData(handle, out var data))
+											{
+												throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取 HID 接口能力");
+											}
+											try
+											{
+												Caps caps;
+												return (HidP_GetCaps(data, out caps) >= 0) ? new HidDevice(path, attributes2.Product, caps.UsagePage, caps.Usage, caps.InputBytes, caps.OutputBytes, caps.FeatureBytes, actualVendor, (stringBuilder.Length > 0) ? stringBuilder.ToString().Trim() : name, container) : null;
+											}
+											finally
+											{
+												HidD_FreePreparsedData(data);
+											}
+										}
+										return (HidDevice?)null;
+									}, new Diagnostics(AppContext.BaseDirectory));
+									if ((object)hidDevice != null)
+									{
+										list.Add(hidDevice);
+									}
+								}
+							}
+						}
+					}
+					finally
+					{
+						Marshal.FreeHGlobal(num3);
+					}
+				}
+				num2++;
+			}
+			return list;
+		}
+		finally
+		{
+			SetupDiDestroyDeviceInfoList(num);
+		}
+	}
+
+	internal static HidDevice? InspectHidInterface(string path, ushort vendor, string name, string container, Func<HidDevice?> inspect, Diagnostics log)
+	{
+		try
+		{
+			return inspect();
+		}
+		catch (Win32Exception ex)
+		{
+			Match match = Regex.Match(path, $"(?i)vid_{vendor:x4}&pid_([0-9a-f]{{4}})(?:[&#\\\\]|$)");
+			if (!match.Success)
+			{
+				throw;
+			}
+			ushort product = Convert.ToUInt16(match.Groups[1].Value, 16);
+			HidDevice hidDevice = new HidDevice(path, product, 0, 0, 0, 0, 0, vendor, name, container, ex.NativeErrorCode);
+			log.HidFailure(hidDevice, "enumerate", ex);
+			return hidDevice;
+		}
+	}
+
+	internal static int? KeyboardWindowsBattery(string expectedName = "AZOTH X")
+	{
+		nint num = SetupDiGetClassDevsW(IntPtr.Zero, "BTHLE", IntPtr.Zero, 6u);
+		if (num == new IntPtr(-1))
+		{
+			return null;
+		}
+		try
+		{
+			uint num2 = 0u;
+			while (true)
+			{
+				DeviceInfo deviceInfo = default(DeviceInfo);
+				deviceInfo.Size = (uint)Marshal.SizeOf<DeviceInfo>();
+				DeviceInfo info = deviceInfo;
+				if (!SetupDiEnumDeviceInfo(num, num2, ref info))
+				{
+					break;
+				}
+				byte[] array = new byte[2048];
+				if (SetupDiGetDeviceRegistryPropertyW(num, ref info, 12u, out var _, array, (uint)array.Length, out var _) && Encoding.Unicode.GetString(array).TrimEnd('\0').Contains(expectedName, StringComparison.OrdinalIgnoreCase))
+				{
+					PropertyKey key = new PropertyKey(new Guid("104ea319-6ee2-4701-bd47-8ddbf425bbe5"), 2u);
+					byte[] array2 = new byte[8];
+					uint type2;
+					uint required2;
+					bool flag = SetupDiGetDevicePropertyW(num, ref info, ref key, out type2, array2, 8u, out required2, 0u) && required2 >= 1;
+					if (flag)
+					{
+						bool flag2 = ((type2 == 3 || type2 == 7) ? true : false);
+						flag = flag2;
+					}
+					if (flag && array2[0] <= 100)
+					{
+						return array2[0];
+					}
+				}
+				num2++;
+			}
+		}
+		finally
+		{
+			SetupDiDestroyDeviceInfoList(num);
+		}
+		return null;
+	}
 }

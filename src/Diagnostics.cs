@@ -2,7 +2,6 @@ using System.IO;
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.ComponentModel;
 
 namespace PeriDock;
 
@@ -20,18 +19,23 @@ internal sealed class Diagnostics
         text = Regex.Replace(text, @"(?i)\\\\\?\\(?:hid|usb|bth)[^\s""<>]*", "[device-path]");
         return Regex.Replace(text, @"(?i)\b(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}\b", "[address]");
     }
-    object Entry(string level, string device, string operation, string message, Exception? error)
-        => new { time = DateTimeOffset.Now, version = "0.2.0-preview.5-startup.1", level, device, operation,
-            message = Redact(message), exception = error?.GetType().Name,
-            nativeError = error is null ? null : NativeError(error),
-            stack = error is null ? null : Redact(error.ToString()) };
-    internal static int? NativeError(Exception error) => error is Win32Exception native ? native.NativeErrorCode :
-        error is UnauthorizedAccessException ? 5 :
-        (error.HResult & 0xffff0000) == 0x80070000 ? error.HResult & 0xffff : null;
+    internal static int? NativeError(Exception error)
+    {
+        if (error is System.ComponentModel.Win32Exception win32) return win32.NativeErrorCode;
+        if (error is UnauthorizedAccessException) return 5;
+        return (error.HResult & unchecked((int)0xFFFF0000)) == unchecked((int)0x80070000) ? error.HResult & 0xFFFF : null;
+    }
     internal void HidFailure(HidDevice device, string operation, Exception error)
-        => Write("error", $"{device.Vendor:x4}:{device.Product:x4}", operation,
-            $"VID={device.Vendor:x4}; PID={device.Product:x4}; Win32={NativeError(error)?.ToString() ?? "unknown"}; " +
-            (NativeError(error) == 5 ? "访问被拒绝；当前权限无法访问设备接口" : Redact(error.Message)), error);
+    {
+        var code = NativeError(error);
+        Write("error", $"{device.Vendor:x4}:{device.Product:x4}", operation,
+            $"VID={device.Vendor:x4}; PID={device.Product:x4}; Win32={code?.ToString() ?? "unknown"}; " +
+            (code == 5 ? "访问被拒绝；当前权限无法访问设备接口" : Redact(error.Message)), error);
+    }
+    object Entry(string level, string device, string operation, string message, Exception? error)
+        => new { time = DateTimeOffset.Now, version = "0.3.0", level, device, operation,
+            message = Redact(message), exception = error?.GetType().Name,
+            stack = error is null ? null : Redact(error.ToString()) };
     internal void Write(string level, string device, string operation, string message, Exception? error = null)
     {
         lock (sync)
@@ -85,10 +89,10 @@ internal sealed class Diagnostics
             var path = Path.Combine(folder, $"Peripheral-Battery-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss-fff}.zip");
             using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
             using (var writer = new StreamWriter(zip.CreateEntry("status.json").Open()))
-                writer.Write(JsonSerializer.Serialize(new { version = "0.2.0-preview.5-startup.1", time = DateTimeOffset.Now,
+                writer.Write(JsonSerializer.Serialize(new { version = "0.3.0", time = DateTimeOffset.Now,
                     os = Environment.OSVersion.VersionString, devices = states.Select(s => new {
                         s.Id, s.Name, s.Connection, s.Connected, s.Percent, s.Charging, s.ChargingNote, s.DpiX, s.DpiY,
-                        s.LastSuccess, s.Source, s.Status, s.Cached, s.Failure, s.ErrorCode }) }, new JsonSerializerOptions { WriteIndented = true }));
+                        s.LastSuccess, s.Source, s.Status, s.Cached }) }, new JsonSerializerOptions { WriteIndented = true }));
             foreach (var file in Directory.EnumerateFiles(LogFolder, "peridock-*.jsonl")
                 .Concat(Directory.EnumerateFiles(LogFolder, "crash-*.json")))
             {

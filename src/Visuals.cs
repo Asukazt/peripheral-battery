@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.IO;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Ellipse = System.Windows.Shapes.Ellipse;
@@ -21,6 +23,7 @@ internal static class Visuals
     internal static readonly Brush Line = Brush("#3B4046");
     internal static readonly Brush Surface = Brush("#262A2E");
     internal static readonly Brush Header = Brush("#24282C");
+    static readonly Dictionary<string, (long Stamp, ImageSource Source)> ProductSources = [];
     internal static Brush Brush(string hex) => new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
 
     internal static DrawingImage IconSource(string name, Brush brush)
@@ -68,48 +71,78 @@ internal static class Visuals
         return frame;
     }
 
-    static readonly Dictionary<string, (long Stamp, ImageSource Source)> ProductSources = [];
     internal static Image Product(BatteryState state, double width, double height)
     {
-        var image = new Image
-        {
-            Width = width, Height = height, Stretch = Stretch.Uniform,
-            SnapsToDevicePixels = true
-        };
+        var image = new Image { Width = width, Height = height, Stretch = Stretch.Uniform, SnapsToDevicePixels = true };
         UpdateProduct(image, state);
         return image;
     }
+
     internal static void UpdateProduct(Image image, BatteryState state)
     {
-        var key = state.ProductImagePath ?? "kind:" + state.Kind;
-        long stamp = 0;
-        try { if (state.ProductImagePath is { } path) stamp = File.GetLastWriteTimeUtc(path).Ticks; }
+        var key = state.GenericImage ? "generic:" + state.Kind : state.ProductImagePath ?? "kind:" + state.Kind;
+        var stamp = 0L;
+        try { if (!state.GenericImage && state.ProductImagePath is not null) stamp = File.GetLastWriteTimeUtc(state.ProductImagePath).Ticks; }
         catch { }
         if (!ProductSources.TryGetValue(key, out var cached) || cached.Stamp != stamp)
         {
             ImageSource? source = null;
-            if (state.ProductImagePath is { } file)
+            if (!state.GenericImage && state.ProductImagePath is not null)
             {
                 try
                 {
-                    var bitmap = new BitmapImage(); bitmap.BeginInit();
-                    bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.UriSource = new Uri(file);
+                    var bitmap = new BitmapImage();
+                    bitmap.BeginInit();
+                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                    bitmap.UriSource = new Uri(state.ProductImagePath);
                     bitmap.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
-                    bitmap.DecodePixelWidth = 512; bitmap.EndInit(); bitmap.Freeze(); source = bitmap;
+                    bitmap.DecodePixelWidth = 512;
+                    bitmap.EndInit();
+                    bitmap.Freeze();
+                    source = bitmap;
                 }
-                catch { source = null; }
+                catch { }
             }
-            source ??= IconSource(state.Kind switch { "mouse" => "mouse", "keyboard" => "keyboard", "headset" => "headphones", _ => "battery-full" }, Muted);
-            cached = (stamp, source); ProductSources[key] = cached;
+            source ??= state.GenericImage ? IconSource(state.Kind switch
+            {
+                "mouse" => "mouse", "keyboard" => "keyboard", "headset" => "headphones", _ => "battery-full"
+            }, Muted) : DefaultProduct(state.Kind);
+            ProductSources[key] = (stamp, source);
         }
-        image.Source = cached.Source;
-        System.Windows.Automation.AutomationProperties.SetName(image, state.Name + " 产品图");
+        image.Source = ProductSources[key].Source;
+        AutomationProperties.SetName(image, state.Name + " 产品图");
     }
+
+    static ImageSource DefaultProduct(string kind)
+    {
+        if (kind is "keyboard" or "mouse" or "headset")
+        {
+            try
+            {
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.UriSource = new Uri(Path.Combine(AppContext.BaseDirectory, "assets", kind + "-display.png"));
+                bitmap.EndInit();
+                bitmap.Freeze();
+                return bitmap;
+            }
+            catch { }
+        }
+        return IconSource(kind switch
+        {
+            "mouse" => "mouse", "keyboard" => "keyboard", "headset" => "headphones", _ => "battery-full"
+        }, Muted);
+    }
+
     internal static Button ProductChoice(BatteryState state, Image image, Action choose)
     {
-        var button = new Button { Content = image, Background = Brushes.Transparent, BorderThickness = new Thickness(0),
-            Padding = new Thickness(0), Cursor = System.Windows.Input.Cursors.Hand, ToolTip = "更换颜色/外观", Template = ButtonTemplate };
-        System.Windows.Automation.AutomationProperties.SetName(button, state.Name + " 更换颜色/外观");
+        var button = new Button
+        {
+            Content = image, Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+            Padding = new Thickness(0), Cursor = Cursors.Hand, ToolTip = "更换颜色/外观", Template = ButtonTemplate
+        };
+        AutomationProperties.SetName(button, state.Name + " 更换颜色/外观");
         button.Click += (_, e) => { choose(); e.Handled = true; };
         return button;
     }
@@ -134,10 +167,9 @@ internal static class Visuals
     };
 
     internal static Brush StateBrush(BatteryState state) => state.IsStale(DateTimeOffset.UtcNow) ? Muted :
-        state.Charging == true || state.Percent <= 25 ? Amber : Green;
+        state.Charging == true || state.IsLow ? Amber : Green;
 
-    internal static string StateText(BatteryState state) => state.Failure == ReadFailure.AccessDenied ? "访问被拒绝" :
-        state.Failure == ReadFailure.ProtocolUnsupported ? "协议未适配" : state.IsStale(DateTimeOffset.UtcNow)
+    internal static string StateText(BatteryState state) => state.IsStale(DateTimeOffset.UtcNow)
         ? state.Cached ? "缓存" : state.Connected == false ? "未连接" : "未更新"
         : state.Charging == true ? "充电中" : state.Charging == false ? "正常" : "充电未知";
 
@@ -155,7 +187,7 @@ internal static class Visuals
         return System.Drawing.Rectangle.FromLTRB((int)topLeft.X, (int)topLeft.Y, (int)bottomRight.X, (int)bottomRight.Y);
     }
 
-    static readonly ControlTemplate ButtonTemplate = (ControlTemplate)System.Windows.Markup.XamlReader.Parse("""
+    internal static readonly ControlTemplate ButtonTemplate = (ControlTemplate)System.Windows.Markup.XamlReader.Parse("""
         <ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" TargetType="Button">
           <Border x:Name="frame" Background="{TemplateBinding Background}" CornerRadius="4"

@@ -12,10 +12,10 @@ namespace PeriDock;
 
 internal sealed class DockWindow : Window
 {
-    readonly Controller controller;
-    readonly List<(TextBlock Percent, Ellipse Dot, Grid Tile, Image Product)> tiles = [];
+    readonly List<(TextBlock Percent, Ellipse Dot, Grid Tile, Image Image)> tiles = [];
     readonly Grid grid;
     readonly ScrollViewer scroll;
+    readonly Controller controller;
     string tileKey = "";
     internal DockWindow(Controller controller)
     {
@@ -68,8 +68,8 @@ internal sealed class DockWindow : Window
             tile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             tile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
             var state = states[i];
-            var product = Product(state, 68, 54);
-            tile.Children.Add(ProductChoice(state, product, () => controller.ChooseAppearance(state)));
+            var image = Product(state, 68, 54);
+            tile.Children.Add(ProductChoice(state, image, () => controller.ChooseAppearance(state)));
             var percent = Text("--", 19, Ink, FontWeights.SemiBold);
             percent.TextWrapping = TextWrapping.NoWrap;
             Grid.SetColumn(percent, 1); tile.Children.Add(percent);
@@ -80,7 +80,7 @@ internal sealed class DockWindow : Window
                 var separator = new Border { Width = 1, Height = 40, Background = Line, HorizontalAlignment = HorizontalAlignment.Right };
                 Grid.SetColumn(separator, i); grid.Children.Add(separator);
             }
-            tiles.Add((percent, dot, tile, product));
+            tiles.Add((percent, dot, tile, image));
         }
     }
 
@@ -100,9 +100,9 @@ internal sealed class DockWindow : Window
         for (var i = 0; i < tiles.Count; i++)
         {
             var state = states[i];
-            UpdateProduct(tiles[i].Product, state);
+            UpdateProduct(tiles[i].Image, state);
             tiles[i].Percent.Text = state.PercentText;
-            tiles[i].Percent.Foreground = state.IsStale(DateTimeOffset.UtcNow) ? Muted : state.Percent <= 25 ? Amber : Ink;
+            tiles[i].Percent.Foreground = state.IsStale(DateTimeOffset.UtcNow) ? Muted : state.IsLow ? Amber : Ink;
             tiles[i].Dot.Fill = StateBrush(state);
             tiles[i].Tile.ToolTip = $"{state.Name} · {state.PercentText}\n{state.Connection}" +
                 (state.Kind == "mouse" ? " · " + state.DpiText : "") + "\n" + StateText(state) +

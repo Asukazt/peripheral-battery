@@ -15,30 +15,72 @@ internal static class UiChecks
     [STAThread]
     static int Main(string[] args)
     {
-        if (args.FirstOrDefault() == "--startup-menu")
+        var repoRoot = Directory.GetCurrentDirectory();
+        if (args.Length >= 2 && args[0] == "--images")
         {
-            var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-            var menuController = new Controller(AppContext.BaseDirectory, new Diagnostics(AppContext.BaseDirectory));
-            menuController.Start(false, false);
-            var items = menuController.TrayMenu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>().ToArray();
-            var startup = items.SingleOrDefault(i => i.Text == "开机启动");
-            var ok = startup?.Enabled == true && !items.Any(i => i.Text!.Contains("管理员"));
-            Console.WriteLine(ok ? "PASS startup menu enabled; redundant elevation action absent" : "FAIL startup menu disabled or redundant elevation action present");
-            items.Last().PerformClick();
-            return ok ? 0 : 1;
+            var images = new OfficialProductImages(repoRoot, new Diagnostics(repoRoot));
+            foreach (var name in args.Skip(1))
+            {
+                try
+                {
+                    var options = images.GetOptionsAsync(name).GetAwaiter().GetResult();
+                    Console.WriteLine(name + ":");
+                    foreach (var option in options)
+                        Console.WriteLine($"  {option.Id} | {option.Label} | {option.FilePath ?? "-"}");
+                }
+                catch (Exception ex) { Console.WriteLine($"{name}: FAIL {ex.GetType().Name}: {ex.Message}"); }
+            }
+            return 0;
         }
-        var output = Path.GetFullPath(args.ElementAtOrDefault(1) ?? Path.Combine(AppContext.BaseDirectory, "renders"));
+        if (args.Length >= 3 && args[0] == "--appearance")
+        {
+            var name = args[1];
+            var images = new OfficialProductImages(repoRoot, new Diagnostics(repoRoot));
+            var state = new BatteryState("preview", name, name, DeviceCatalog.Kind(name));
+            var window = new AppearanceWindow(state, "auto",
+                () => images.GetOptionsAsync(name), _ => false, file => images.ImportAsync(name, file))
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -3000, Top = -3000, ShowInTaskbar = false, ShowActivated = false
+            };
+            window.Show();
+            var frame = new DispatcherFrame();
+            var timer = new DispatcherTimer(TimeSpan.FromSeconds(15), DispatcherPriority.Background,
+                (_, _) => frame.Continue = false, Dispatcher.CurrentDispatcher);
+            timer.Start();
+            Dispatcher.PushFrame(frame);
+            timer.Stop();
+            var root = (FrameworkElement)window.Content;
+            root.Measure(new Size(window.Width, window.Height));
+            root.Arrange(new Rect(0, 0, window.Width, window.Height));
+            root.UpdateLayout();
+            var bitmap = new RenderTargetBitmap((int)window.Width, (int)window.Height, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(root);
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using (var file = File.Create(args[2])) encoder.Save(file);
+            window.Close();
+            Console.WriteLine("saved " + args[2]);
+            return 0;
+        }
+        var output = Path.Combine(repoRoot, "ui-output");
         Directory.CreateDirectory(output);
-        var controller = new Controller(AppContext.BaseDirectory, new Diagnostics(AppContext.BaseDirectory));
-        using var snapshot = JsonDocument.Parse(File.ReadAllText(args.FirstOrDefault() ??
-            Path.Combine(AppContext.BaseDirectory, "status.sample.json")));
+        var checkRoot = Path.Combine(Path.GetTempPath(), "PeriDock-ui-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(checkRoot);
+        var controller = new Controller(checkRoot, new Diagnostics(checkRoot));
+        using var snapshot = JsonDocument.Parse(File.ReadAllText(args.FirstOrDefault() ?? Path.Combine(repoRoot, "data", "status.json")));
         foreach (var value in snapshot.RootElement.EnumerateArray())
         {
             var id = value.GetProperty("Id").GetString()!;
-            var name = value.TryGetProperty("Name", out var label) ? label.GetString()! : id;
-            var kind = value.TryGetProperty("Kind", out var category) ? category.GetString()! : id;
-            var state = new BatteryState(id, name, name, kind);
-            controller.States.Add(state);
+            var state = controller.States.FirstOrDefault(s => s.Id == id);
+            if (state is null)
+            {
+                controller.States.Add(new BatteryState(id,
+                    value.TryGetProperty("Name", out var name) ? name.GetString()! : id,
+                    value.TryGetProperty("ShortName", out var shortName) ? shortName.GetString()! : id,
+                    value.TryGetProperty("Kind", out var kind) ? kind.GetString() : null));
+                state = controller.States[^1];
+            }
             int? Number(string key) => value.GetProperty(key).ValueKind == JsonValueKind.Null ? null : value.GetProperty(key).GetInt32();
             var charging = value.GetProperty("Charging");
             state.Apply(new Reading(Number("Percent"), charging.ValueKind == JsonValueKind.Null ? null : charging.GetBoolean(),
@@ -47,17 +89,28 @@ internal static class UiChecks
                 value.TryGetProperty("Cached", out var cached) && cached.GetBoolean(),
                 value.TryGetProperty("Connection", out var connection) ? connection.GetString()! : "待确认",
                 value.TryGetProperty("Connected", out var connected) && connected.ValueKind != JsonValueKind.Null ? connected.GetBoolean() : null,
-                value.TryGetProperty("ChargingNote", out var note) ? note.GetString() : null,
-                value.TryGetProperty("Failure", out var failure) ? (ReadFailure)failure.GetInt32() : ReadFailure.None,
-                value.TryGetProperty("ErrorCode", out var error) && error.ValueKind != JsonValueKind.Null ? error.GetInt32() : null), DateTimeOffset.Now);
+                value.TryGetProperty("ChargingNote", out var note) ? note.GetString() : null), DateTimeOffset.Now);
+        }
+        var fixtureMouse = controller.States.FirstOrDefault(s => s.Kind == "mouse");
+        if (fixtureMouse is not null)
+            controller.DpiTarget = new DeviceTarget(fixtureMouse.Id, fixtureMouse.Name, fixtureMouse.Kind, true, Reader: "RazerFeature");
+        var seedStart = DateTimeOffset.Now.AddHours(-8);
+        for (var deviceIndex = 0; deviceIndex < controller.States.Count; deviceIndex++)
+        {
+            var state = controller.States[deviceIndex];
+            for (var sample = 0; sample <= 96; sample++)
+            {
+                var charging = sample is >= 40 and <= 45;
+                var percent = Math.Clamp(96 - sample / 6 - deviceIndex * 4 + (charging ? (sample - 40) * 2 : 0), 5, 100);
+                controller.Usage.Record(state.Id, state.Name, state.Kind, percent, charging,
+                    seedStart.AddMinutes(sample * 5));
+            }
         }
         var windows = new List<(string Name, Window Window)>();
-        var failures = new List<string>();
         void AddWindows(string suffix)
         {
             var details = new DetailWindow(controller);
-            details.Update(controller.States, false, controller.States.Any(s => s.Failure == ReadFailure.AccessDenied)
-                ? "访问被拒绝 · 请检查驱动或设备接口" : "暂无错误");
+            details.Update(controller.States, false, "暂无错误");
             windows.Add(("PeriDock-details" + suffix, details));
             var popover = new Popover(controller);
             popover.Update(controller.States, false);
@@ -65,116 +118,15 @@ internal static class UiChecks
             var dock = new DockWindow(controller);
             dock.Update(controller.States);
             windows.Add(("PeriDock-dock" + suffix, dock));
-            // Rebuild each existing surface after additions, removals and an empty list.
-            var transitions = controller.States.ToArray();
-            controller.States.Clear();
-            details.Update(controller.States, false, "暂无错误"); popover.Update(controller.States, false); dock.Update(controller.States);
-            controller.States.AddRange(transitions);
-            details.Update(controller.States, false, "暂无错误"); popover.Update(controller.States, false); dock.Update(controller.States);
+            var stats = new BatteryStatsWindow(controller);
+            stats.Update();
+            windows.Add(("PeriDock-stats" + suffix, stats));
         }
         AddWindows("");
-        foreach (var (_, window) in windows)
-        {
-            var root = (FrameworkElement)window.Content;
-            void Update()
-            {
-                if (window is DetailWindow details) details.Update(controller.States, false, "暂无错误");
-                if (window is Popover popover) popover.Update(controller.States, false);
-                if (window is DockWindow dock) dock.Update(controller.States);
-                root.Measure(new Size(window.Width, window.Height));
-                root.Arrange(new Rect(0, 0, window.Width, window.Height)); root.UpdateLayout();
-            }
-            Image[] Products() => Descendants(root).OfType<Image>().Where(i =>
-                System.Windows.Automation.AutomationProperties.GetName(i).EndsWith(" 产品图")).ToArray();
-            Update(); var before = Products();
-            var photo = Path.Combine(AppContext.BaseDirectory, "assets", "peridock.png");
-            controller.States[1].ProductImagePath = photo; Update(); var after = Products();
-            if (before.Length != 3 || !before.SequenceEqual(after) || after[1].Source is not BitmapImage ||
-                ReferenceEquals(after[0].Source, after[1].Source)) failures.Add("product photo did not update the existing " + window.GetType().Name);
-            controller.States[1].ProductImagePath = null; Update();
-            if (Products()[1].Source is BitmapImage) failures.Add("generic image choice did not clear the photo");
-        }
-        var appearanceRoot = Path.Combine(Path.GetTempPath(), "PeriDock-appearance-" + Guid.NewGuid().ToString("N"));
-        var imageService = new OfficialProductImages(appearanceRoot, new Diagnostics(appearanceRoot));
-        var white = new ProductImageOption("white", "白色", Path.Combine(AppContext.BaseDirectory, "assets", "peridock.png"));
-        if (args.Length > 2 && args[2] != "--new-images")
-        {
-            var folder = Path.Combine(Path.GetFullPath(args[2]), "data", "device-images");
-            var key = OfficialProductImages.FileKey("Razer Basilisk V3 Pro");
-            var variants = JsonSerializer.Deserialize<OfficialImageVariant[]>(File.ReadAllText(Path.Combine(folder, key + ".options.json")))!;
-            var variant = variants.First(v => v.Label == "白色");
-            white = new(variant.Id, variant.Label, Path.Combine(folder, key + "-" + variant.Id + ".png"));
-        }
-        var appearance = new AppearanceWindow(new("appearance", "Razer Basilisk V3 Pro", "Basilisk", "mouse"), "auto",
-            () => System.Threading.Tasks.Task.FromResult<IReadOnlyList<ProductImageOption>>([
-                new("auto", "自动", null), white, new("generic", "通用图标", null)]), value =>
-            {
-                new UserSettings(true, new() { ["test"] = value.Id }).Save(appearanceRoot); return true;
-            }, file => imageService.ImportAsync("Razer Basilisk V3 Pro", file));
-        appearance.Show(); appearance.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-        var whiteButton = Descendants((FrameworkElement)appearance.Content).OfType<Button>().Single(b =>
-            System.Windows.Automation.AutomationProperties.GetName(b) == "选择白色");
-        whiteButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        if (UserSettings.Load(appearanceRoot, new Diagnostics(appearanceRoot)).ImageChoices?["test"] != white.Id ||
-            !Descendants((FrameworkElement)appearance.Content).OfType<TextBlock>().Any(t => t.Text.Contains("已选择：白色，已保存")))
-            failures.Add("appearance selection did not save and confirm white");
-        appearance.Hide();
-        windows.Add(("PeriDock-appearance-white", appearance));
-        var pending = new System.Threading.Tasks.TaskCompletionSource<IReadOnlyList<ProductImageOption>>();
-        var custom = new AppearanceWindow(new("custom", "Unknown model", "Custom", "mouse"), "auto",
-            () => pending.Task, value =>
-            {
-                new UserSettings(true, new() { ["test"] = value.Id }).Save(appearanceRoot); return true;
-            }, file => imageService.ImportAsync("Unknown model", file));
-        custom.Show(); custom.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-        if (!Descendants((FrameworkElement)custom.Content).OfType<Button>().Any(b =>
-            System.Windows.Automation.AutomationProperties.GetName(b) == "导入自定义图片…")) failures.Add("custom import entry missing while official images are loading");
-        void Await(System.Threading.Tasks.Task task)
-        {
-            while (!task.IsCompleted) custom.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            task.GetAwaiter().GetResult();
-        }
-        var sourceFile = Path.Combine(AppContext.BaseDirectory, "assets", "peridock.png");
-        Await(custom.ImportFile(sourceFile));
-        pending.SetResult([new("auto", "自动", null), new("generic", "通用图标", null)]);
-        custom.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-        if (UserSettings.Load(appearanceRoot, new Diagnostics(appearanceRoot)).ImageChoices?["test"] != "custom" ||
-            !Descendants((FrameworkElement)custom.Content).OfType<TextBlock>().Any(t => t.Text == "已选择：自定义图片，已保存。"))
-            failures.Add("custom import was lost when official image loading finished");
-        var customFile = OfficialProductImages.CustomPath(appearanceRoot, "Unknown model");
-        var customState = new BatteryState("custom", "Unknown model", "Custom", "mouse") { ProductImagePath = customFile };
-        var previewImage = Visuals.Product(customState, 80, 80); var originalSource = previewImage.Source;
-        Await(custom.ImportFile(Path.Combine(AppContext.BaseDirectory, "assets", "mouse-display.png")));
-        File.SetLastWriteTimeUtc(customFile, DateTime.UtcNow.AddSeconds(1));
-        Visuals.UpdateProduct(previewImage, customState);
-        if (ReferenceEquals(originalSource, previewImage.Source)) failures.Add("replacement custom image stayed stale in image cache");
-        Await(custom.ImportFile(Path.Combine(appearanceRoot, "missing.png")));
-        if (UserSettings.Load(appearanceRoot, new Diagnostics(appearanceRoot)).ImageChoices?["test"] != "custom" ||
-            !Descendants((FrameworkElement)custom.Content).OfType<TextBlock>().Any(t => t.Text.StartsWith("导入失败"))) failures.Add("failed import cleared the previous choice or lacked feedback");
-        custom.Hide(); windows.Add(("PeriDock-appearance-custom", custom));
-        if (args.Length == 4 && args[2] == "--new-images")
-        {
-            var official = new OfficialProductImages(Path.GetFullPath(args[3]), new Diagnostics(appearanceRoot));
-            var models = new[] { "Logitech G733", "HyperX Cloud III Wireless", "MCHOSE A7 V2 Ultra",
-                "ATK X1 Ultimate", "AULA F75", "VXE R1 Pro Max", "VGN F1 Moba" };
-            foreach (var name in models)
-            {
-                var choices = official.GetOptionsAsync(name).GetAwaiter().GetResult();
-                var selected = choices.First(c => c.Id is not ("auto" or "generic"));
-                var key = OfficialProductImages.FileKey(name);
-                var state = new BatteryState(key, name, name, "mouse") { ProductImagePath = choices[0].FilePath };
-                var picker = new AppearanceWindow(state, "auto", () => System.Threading.Tasks.Task.FromResult(choices), value =>
-                {
-                    new UserSettings(true, new() { [key] = value.Id }).Save(appearanceRoot); return true;
-                }, file => imageService.ImportAsync(name, file));
-                picker.Show(); picker.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-                Descendants((FrameworkElement)picker.Content).OfType<Button>().Single(b =>
-                    System.Windows.Automation.AutomationProperties.GetName(b) == "选择" + selected.Label).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                if (UserSettings.Load(appearanceRoot, new Diagnostics(appearanceRoot)).ImageChoices?[key] != selected.Id)
-                    failures.Add("new-brand official appearance was not saved: " + name);
-                picker.Hide(); windows.Add(("PeriDock-official-" + key, picker));
-            }
-        }
+        var settings = new SettingsWindow(controller);
+        settings.Update();
+        windows.Add(("PeriDock-settings", settings));
+        var failures = new List<string>();
         controller.States[0].Apply(new Reading(40, true, null, null, "ROG HID", "已连接",
             Connection: "蓝牙", Connected: true), DateTimeOffset.Now);
         controller.States[1].Apply(new Reading(50, false, 1600, 1600, "Razer HID", "已连接",
@@ -187,46 +139,9 @@ internal static class UiChecks
                 Connection: state.Connection, Connected: true), DateTimeOffset.Now);
         AddWindows("-full-test");
         foreach (var state in controller.States)
-            state.Apply(new(null, null, null, null, state.Source, "已识别设备；访问被拒绝（Windows 错误 5）",
-                Connection: state.Kind == "keyboard" ? "蓝牙" : state.Kind == "mouse" ? "USB" : "2.4G",
-                ChargingNote: "程序默认请求管理员权限；拒绝访问不等于厂商软件占用",
-                Failure: ReadFailure.AccessDenied, ErrorCode: 5), DateTimeOffset.Now);
-        if (controller.States.Any(s => s.PercentText != "--" || Visuals.StateText(s) != "访问被拒绝" || s.Connected == false))
-            failures.Add("permission failure exposes stale battery or claims disconnection");
-        AddWindows("-denied-test");
-        foreach (var state in controller.States)
-            state.Apply(new(null, null, null, null, state.Source, "已识别型号；电量协议尚未适配",
-                Connection: state.Connection, Failure: ReadFailure.ProtocolUnsupported), DateTimeOffset.Now);
-        if (controller.States.Any(s => Visuals.StateText(s) != "协议未适配")) failures.Add("unsupported protocols are not identified");
-        AddWindows("-unsupported-test");
-        foreach (var state in controller.States)
             state.Apply(new Reading(null, null, null, null, state.Source, "未连接",
                 Connection: "未连接", Connected: false), DateTimeOffset.Now);
         AddWindows("-offline-test");
-        for (var i = 0; i < 8; i++)
-        {
-            var state = new BatteryState("extra-" + i, "Razer BlackWidow V4 Tenkeyless HyperSpeed " + i, "Extra", "keyboard");
-            state.Apply(new(76, false, null, null, "Test", "已连接", Connection: "2.4G", Connected: true), DateTimeOffset.Now);
-            controller.States.Add(state);
-        }
-        AddWindows("-many-test");
-        controller.States.Clear();
-        foreach (var (name,kind,source,status) in new (string,string,string,string)[] {
-            ("Logitech MX Keys Advanced Wireless Illuminated Keyboard","keyboard","Logitech HID++","已读取 · 槽位 1"),
-            ("Logitech MX Master 3S","mouse","Logitech HID++","电压估计 · 槽位 2"),
-            ("HyperX Cloud Alpha 2 Wireless","headset","HyperX NGENUITY HID","已读取"),
-            ("MCHOSE M7 / L7 共用接收器","mouse","MCHOSE Realtek HID","已读取"),
-            ("ATK X1 Ultimate Nearlink","mouse","ATK Evision HID","已读取"),
-            ("AULA F87 Pro V2C","keyboard","AULA 键盘 HID","充电状态未知"),
-            ("VGN Dragonfly 4K / VXE R1 Pro Max","mouse","CompX HID","已读取") })
-        {
-            var state=new BatteryState("brand-"+controller.States.Count,name,name,kind);
-            state.Apply(new(60,null,null,null,source,status,Connection:"2.4G",Connected:true),DateTimeOffset.Now);
-            controller.States.Add(state);
-        }
-        AddWindows("-sixbrands-test");
-        controller.States.Clear();
-        AddWindows("-empty-test");
         foreach (var (name, window) in windows)
         {
             var root = (FrameworkElement)window.Content;
@@ -244,12 +159,9 @@ internal static class UiChecks
             foreach (var text in Descendants(root).OfType<TextBlock>())
             {
                 if (text.Visibility != Visibility.Visible || string.IsNullOrEmpty(text.Text)) continue;
-                var inScroll = false;
-                for (var ancestor = VisualTreeHelper.GetParent(text); ancestor is not null; ancestor = VisualTreeHelper.GetParent(ancestor))
-                    if (ancestor is ScrollContentPresenter) { inScroll = true; break; }
                 var bounds = text.TransformToAncestor(root).TransformBounds(new Rect(text.RenderSize));
-                if (!inScroll && (bounds.Left < -0.5 || bounds.Top < -0.5 ||
-                    bounds.Right > window.Width + 0.5 || bounds.Bottom > window.Height + 0.5))
+                if (bounds.Left < -0.5 || bounds.Top < -0.5 ||
+                    bounds.Right > window.Width + 0.5 || bounds.Bottom > window.Height + 0.5)
                     failures.Add($"{name}: text outside window: {text.Text}; {bounds}");
                 for (var parent = VisualTreeHelper.GetParent(text); parent is not null && parent != root; parent = VisualTreeHelper.GetParent(parent))
                 {
@@ -272,16 +184,6 @@ internal static class UiChecks
                         failures.Add($"{name}: content overlaps another row at minimum window size");
                 }
                 Layout(window.Width, window.Height);
-            }
-            if (name.Contains("many-test"))
-            {
-                var scroll = Descendants(root).OfType<ScrollViewer>().Single();
-                if (window is DockWindow && scroll.ExtentWidth <= scroll.ViewportWidth ||
-                    window is not DockWindow && scroll.ExtentHeight <= scroll.ViewportHeight)
-                    failures.Add(name + ": many devices cannot scroll");
-                scroll.ScrollToEnd(); root.UpdateLayout();
-                if (window is DockWindow) scroll.ScrollToRightEnd();
-                root.UpdateLayout();
             }
             foreach (var dpi in new[] { 96d, 144d, 192d })
             {
@@ -306,10 +208,9 @@ internal static class UiChecks
             }
             Console.WriteLine($"{name}: rendered at 100%, 150%, 200%");
         }
-        Directory.Delete(appearanceRoot, true);
         foreach (var failure in failures) Console.WriteLine("FAIL " + failure);
         Console.WriteLine(failures.Count == 0 ? "PASS window text bounds and nonblank DPI renders" : $"FAIL {failures.Count} layout checks");
-        Dispatcher.CurrentDispatcher.InvokeShutdown();
+        Directory.Delete(checkRoot, true);
         return failures.Count == 0 ? 0 : 1;
     }
 

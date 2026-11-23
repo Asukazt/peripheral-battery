@@ -1,128 +1,433 @@
+#nullable disable
+using System;
+using System.Linq;
+
 namespace PeriDock;
 
 internal static class MultiBrandProtocols
 {
-    internal static byte[] Request(string reader, byte command=0, ushort sequence=1, byte report=0)
-    {
-        byte[] Frame(int length, params byte[] prefix) { var value=new byte[length]; prefix.CopyTo(value,0); return value; }
-        return reader switch
-        {
-            "Compx" => Convert.FromHexString("0804000000000000000000000000000049"),
-            "AtkNearlink" or "AtkKeyboard" => Frame(reader=="AtkKeyboard"?32:64,report,(byte)sequence,(byte)(sequence>>8),0x1a),
-            "AtkBitmouse" => Bitmouse(command==0?(byte)7:command),
-            "AulaKeyboard" => Frame(33,0,0xaa,0x10),
-            "AulaMouse" => Frame(32,4,0,0,command==0?(byte)0x1a:command),
-            "MchoseMouse" => Inverted(report==0?(byte)0x11:report),
-            "MchoseG7" => Frame(65,0,0x55,0x30,0xa5,0x0b,0x2e,1,1,1),
-            "MchoseA5" => Frame(65,0,0,0,2,2,0,0x83),
-            "MchoseKeyboard" => Frame(20,0x13,0x4a,1,0,0,2),
-            "MchoseV9" => Frame(64,0x55,0x65,1),
-            "MchoseTurbo" => command==1?Frame(64,0x55,0x65,1):Frame(64,0x55,0xaa,1,0,1,0,1,0x0b,0),
-            "HyperXCloud2" => Frame(52,6,0xff,0xbb,command==0?(byte)2:command),
-            "HyperXKingston" => Frame(62,6,0,2,0,0x9a,0,0,0x68,0x4a,0x8e,0x0a,0,0,0,0xbb,command==0?(byte)2:command),
-            "HyperXCloud3" => Frame(62,0x66,command==0?(byte)0x89:command),
-            "HyperXCloud3S" => Frame(64,0x0c,2,3,1,0,command==0?(byte)6:command),
-            "HyperXAlpha" => Frame(31,0x21,0xbb,command==0?(byte)0x0b:command),
-            "HyperXAlpha2" or "HyperXHaste" => Frame(64,command==0?(byte)0x50:command,command==0x52?(byte)1:(byte)2),
-            "HyperXFlight" => Frame(20,0x21,0xff,5),
-            "LogitechCenturion" => Frame(64,0x51,8,0,3,0x1a,0,3,0,4,0x0a),
-            _ => throw new ArgumentException("Unsupported battery request")
-        };
-    }
-    static byte[] Inverted(byte report)
-    {
-        var p=Enumerable.Repeat((byte)0xff,report==0x11?21:65).ToArray();p[0]=report;p[1]=0xf9;return p;
-    }
-    static byte[] Bitmouse(byte command)
-    {
-        var p=new byte[64];p[0]=8;p[2]=0x72;p[3]=2;p[5]=1;p[6]=command;p[7]=1;p[1]=(byte)p.Skip(2).Sum(b=>(int)b);return p;
-    }
-    static Reading Value(string source,int? percent,bool? charging=null,string status="已读取")
-        => new(percent,charging,null,null,source,status,Connected:true,ChargingNote:charging is null?"此协议未提供可确认的充电状态":null);
-    internal static Reading? Power(string reader,byte[] p,ushort sequence=1,byte report=0)
-    {
-        bool Header(params byte[] prefix)=> p.AsSpan().StartsWith(prefix);
-        switch(reader)
-        {
-            case "Compx":
-                if(p.Length<17 || !Header(8,4) || p.Take(17).Sum(b=>(int)b)%256!=0x55 || p[6]>100)return null;
-                return Value("CompX HID",p[6],p[7]!=0);
-            case "AtkNearlink": case "AtkKeyboard":
-                if(p.Length<(reader=="AtkKeyboard"?10:64) || !Header(report,(byte)sequence,(byte)(sequence>>8),0x1a) || p[8]>100)return null;
-                if(reader=="AtkKeyboard" && (p[5]!=0 || p[6]!=0 || p[9]>2))return null;
-                return Value("ATK Evision HID",p[8],p[9]!=0);
-            case "AtkBitmouse":
-                if(p.Length<8 || !Header(8,0x72) || p[2]==0xff || p[5]!=7 || p[6]<1 || p[7] is 0 or >100)return null;
-                return Value("ATK BITMOUSE HID",p[7]);
-            case "AulaKeyboard":
-                var at=Header(0,0x55,0x10)?1:Header(0x55,0x10)?0:-1;
-                if(at<0 || p.Length<=at+25 || p[at+25] is 0 or >100)return null;
-                return Value("AULA 键盘 HID",p[at+25]);
-            case "AulaMouse":
-                if(p.Length<10 || !Header(4,0,0,0x1a) || p[5]!=0 || p[6]!=0 || p[8] is 0 or >100 || p[9]>2)return null;
-                return Value("AULA Evision HID",p[8],p[9] is 1 or 2,"接收器电量；无线在线状态待确认") with {Connected=null,Cached=true};
-            case "MchoseMouse":
-                if(p.Length<13 || p[0] is not (0x11 or 0x12) || p[1]!=0xf9)return null;
-                var data=p.Skip(2).Select(b=>(byte)(b^0xff)).ToArray();var vid=data[0]|data[1]<<8;
-                if(vid is not (0x5253 or 0x3837) || data[9]>100 || data[10]>1)return null;
-                return Value("MCHOSE Realtek HID",data[9],data[10]==1);
-            case "MchoseG7":
-                if(p.Length<10 || !Header(0xaa,0x30) || p[8]>100 || p[9]>1)return null;
-                return Value("MCHOSE G7 HID",p[8],p[9]==1,"设备原始读数（可能抖动）");
-            case "MchoseA5":
-                at=Header(0xa1)?0:Header(0,0xa1)?1:-1;
-                if(at<0 || p.Length<at+8 || p[at+4]!=0 || p[at+5]!=0x83 || p[at+7]>100)return null;
-                return Value("MCHOSE A5 HID",p[at+7],p[at+6]!=0);
-            case "MchoseKeyboard":
-                if(p.Length<20 || !Header(0x13,0x4a,1) || p[5]>100 || (byte)p.Take(19).Sum(b=>(int)b)!=p[19])return null;
-                return Value("MCHOSE K87 HID",p[5]);
-            case "MchoseV9":
-                if(p.Length<4 || !Header(0x55,0x65) || p[2]>100)return null;
-                return Value("MCHOSE V9 HID",p[2],p[3] is 0?true:p[3] is 2?false:null);
-            case "MchoseTurbo":
-                if(Header(0x55,0x65) && p.Length>=4 && p[2]<=100 && p[3] is 2 or 3 or 4)
-                    return Value("MCHOSE Turbo HID",p[2],p[3]==2?false:null);
-                if(p.Length<11 || !Header(0x55,0xaa,1) || p[3]>1 || p[4]<3 || p.Length<8+p[4] || p[5]!=0 || p[6]!=1 || p[7]!=0x0b || p[8]==0 || (p[9]&0x7f)>100)return null;
-                var checksum=p[3]^p[4]^p[5]^p[6]^p[7];
-                for(var i=8;i<7+p[4];i++)checksum^=p[i];
-                if(p[7+p[4]]!=(p[3]==1?checksum:0))return null;
-                return Value("MCHOSE Turbo HID",p[9]&0x7f);
-            case "HyperXCloud2": case "HyperXKingston":
-                if(p.Length<8 || !(reader=="HyperXCloud2"?Header(6,0xff,0xbb,2):Header(0x0b,0,0xbb,2)) || p[7]>100)return null;
-                return Value("HyperX Cloud II HID",p[7]);
-            case "HyperXCloud3":
-                if(p.Length<5 || p[0]!=0x66 || p[1] is not (0x89 or 0x0d) || (p[2]==0 && p[3]==0) || p[4]>100)return null;
-                return Value("HyperX Cloud III HID",p[4]);
-            case "HyperXCloud3S":
-                if(p.Length<7 || !Header(0x0c) || p[5]!=6 || p[6]>100)return null;
-                return Value("HyperX Cloud III S HID",p[6]);
-            case "HyperXAlpha":
-                if(p.Length<4 || !Header(0x21,0xbb,0x0b) || p[3]>100)return null;
-                return Value("HyperX Cloud Alpha HID",p[3]);
-            case "HyperXAlpha2": case "HyperXHaste":
-                if(p.Length<(reader=="HyperXHaste"?10:7) || !Header(0x51,2) || p[2]>100)return null;
-                return Value("HyperX NGENUITY HID",p[2],reader=="HyperXAlpha2"?(p[6]&0x80)!=0:Charge(p[3]));
-            case "HyperXFlight":
-                if(p.Length is not (15 or 20))return null;
-                var mv=(p[3]<<8)|p[4];if(mv is <2500 or >5000)return null;
-                if(mv>0x100b)return Value("HyperX Cloud Flight HID",null,true,"充电中；电压不能换算实时百分比");
-                var percent=mv<=3648?0.00125*mv:mv>3975?100:0.00000002547505*Math.Pow(mv,4)-0.0003900299*Math.Pow(mv,3)+2.238321*mv*mv-5706.256*mv+5452299;
-                return Value("HyperX Cloud Flight 电压估计",Math.Clamp((int)Math.Round(percent),0,100),false,"电压换算估计，非设备直报百分比");
-            case "LogitechCenturion":
-                if(p.Length<13 || !Header(0x51,0x0b) || p[8]!=4 || p[10]>100)return null;
-                return Value("Logitech Centurion HID",p[10],p[12]==2);
-            default:return null;
-        }
-    }
-    internal static bool? Charge(byte state)=> state switch {0=>false,1 or 2=>true,_=>null};
-    internal static bool? Charging(string reader,byte[] p)
-    {
-        if(reader=="HyperXCloud3" && p.Length>=3 && p[0]==0x66 && p[1] is 0x8a or 0x0c)return Charge(p[2]);
-        if(reader=="HyperXCloud3S" && p.Length>=7 && p[0]==0x0c && p[5]==0x48)return Charge(p[6]);
-        if(reader is "HyperXCloud2" or "HyperXKingston" && p.Length>=5 && p[2]==0xbb && p[3]==3 &&
-            (reader=="HyperXCloud2"?p[0]==6 && p[1]==0xff:p[0]==0x0b && p[1]==0))return Charge(p[4]);
-        if(reader=="HyperXAlpha" && p.Length>=4 && p.AsSpan().StartsWith(new byte[]{0x21,0xbb,0x0c}) && p[3]<=1)return p[3]==1;
-        if(reader=="AtkBitmouse" && p.Length>=8 && p[0]==8 && p[1]==0x72 && p[2]!=0xff && p[5]==15 && p[6]>=1 && p[7]<=1)return p[7]==1;
-        return null;
-    }
+	internal static byte[] Request(string reader, byte command = 0, ushort sequence = 1, byte report = 0)
+	{
+		switch (reader)
+		{
+		case "Compx":
+			return Convert.FromHexString("0804000000000000000000000000000049");
+		case "AtkNearlink":
+		case "AtkKeyboard":
+			return Frame((reader == "AtkKeyboard") ? 32 : 64, new byte[4]
+			{
+				report,
+				(byte)sequence,
+				(byte)(sequence >> 8),
+				26
+			});
+		case "AtkBitmouse":
+			return Bitmouse((byte)((command == 0) ? 7 : command));
+		case "AulaKeyboard":
+			return Frame(33, new byte[3] { 0, 170, 16 });
+		case "AulaMouse":
+			return Frame(32, new byte[4]
+			{
+				4,
+				0,
+				0,
+				(byte)((command == 0) ? 26 : command)
+			});
+		case "MchoseMouse":
+			return Inverted((byte)((report == 0) ? 17 : report));
+		case "MchoseG7":
+			return Frame(65, new byte[9] { 0, 85, 48, 165, 11, 46, 1, 1, 1 });
+		case "MchoseA5":
+			return Frame(65, new byte[7] { 0, 0, 0, 2, 2, 0, 131 });
+		case "MchoseKeyboard":
+			return Frame(20, new byte[6] { 19, 74, 1, 0, 0, 2 });
+		case "MchoseV9":
+			return Frame(64, new byte[3] { 85, 101, 1 });
+		case "MchoseTurbo":
+			return (command == 1) ? Frame(64, new byte[3] { 85, 101, 1 }) : Frame(64, new byte[9] { 85, 170, 1, 0, 1, 0, 1, 11, 0 });
+		case "HyperXCloud2":
+		{
+			byte[] obj2 = new byte[4] { 6, 255, 187, 0 };
+			obj2[3] = (byte)((command == 0) ? 2 : command);
+			return Frame(52, obj2);
+		}
+		case "HyperXKingston":
+		{
+			byte[] obj = new byte[16]
+			{
+				6, 0, 2, 0, 154, 0, 0, 104, 74, 142,
+				10, 0, 0, 0, 187, 0
+			};
+			obj[15] = (byte)((command == 0) ? 2 : command);
+			return Frame(62, obj);
+		}
+		case "HyperXCloud3":
+			return Frame(62, new byte[2]
+			{
+				102,
+				(byte)((command == 0) ? 137 : command)
+			});
+		case "HyperXCloud3S":
+		{
+			byte[] obj3 = new byte[6] { 12, 2, 3, 1, 0, 0 };
+			obj3[5] = (byte)((command == 0) ? 6 : command);
+			return Frame(64, obj3);
+		}
+		case "HyperXAlpha":
+			return Frame(31, new byte[3]
+			{
+				33,
+				187,
+				(byte)((command == 0) ? 11 : command)
+			});
+		case "HyperXHaste":
+		case "HyperXAlpha2":
+			return Frame(64, new byte[2]
+			{
+				(byte)((command == 0) ? 80 : command),
+				(byte)((command == 82) ? 1 : 2)
+			});
+		case "HyperXFlight":
+			return Frame(20, new byte[3] { 33, 255, 5 });
+		case "LogitechCenturion":
+			return Frame(64, new byte[10] { 81, 8, 0, 3, 26, 0, 3, 0, 4, 10 });
+		default:
+			throw new ArgumentException("Unsupported battery request");
+		}
+		static byte[] Frame(int length, byte[] prefix)
+		{
+			byte[] array = new byte[length];
+			prefix.CopyTo(array, 0);
+			return array;
+		}
+	}
+
+	private static byte[] Inverted(byte report)
+	{
+		byte[] array = Enumerable.Repeat(byte.MaxValue, (report == 17) ? 21 : 65).ToArray();
+		array[0] = report;
+		array[1] = 249;
+		return array;
+	}
+
+	private static byte[] Bitmouse(byte command)
+	{
+		byte[] array = new byte[64];
+		array[0] = 8;
+		array[2] = 114;
+		array[3] = 2;
+		array[5] = 1;
+		array[6] = command;
+		array[7] = 1;
+		array[1] = (byte)array.Skip(2).Sum((byte b) => b);
+		return array;
+	}
+
+	private static Reading Value(string source, int? percent, bool? charging = null, string status = "已读取")
+	{
+		return new Reading(percent, charging, null, null, source, status, Cached: false, "待确认", true, (!charging.HasValue) ? "此协议未提供可确认的充电状态" : null);
+	}
+
+	internal static Reading? Power(string reader, byte[] p, ushort sequence = 1, byte report = 0)
+	{
+		byte[] p2 = p;
+		switch (reader)
+		{
+		case "Compx":
+			if (p2.Length < 17 || !Header(new byte[2] { 8, 4 }) || p2.Take(17).Sum((byte b) => b) % 256 != 85 || p2[6] > 100)
+			{
+				return null;
+			}
+			return Value("CompX HID", p2[6], p2[7] != 0);
+		case "AtkNearlink":
+		case "AtkKeyboard":
+			if (p2.Length < ((reader == "AtkKeyboard") ? 10 : 64) || !Header(new byte[4]
+			{
+				report,
+				(byte)sequence,
+				(byte)(sequence >> 8),
+				26
+			}) || p2[8] > 100)
+			{
+				return null;
+			}
+			if (reader == "AtkKeyboard" && (p2[5] != 0 || p2[6] != 0 || p2[9] > 2))
+			{
+				return null;
+			}
+			return Value("ATK Evision HID", p2[8], p2[9] != 0);
+		case "AtkBitmouse":
+		{
+			bool flag = p2.Length < 8 || !Header(new byte[2] { 8, 114 }) || p2[2] == byte.MaxValue || p2[5] != 7 || p2[6] < 1;
+			if (!flag)
+			{
+				byte b2 = p2[7];
+				bool flag2 = ((b2 > 100 || b2 == 0) ? true : false);
+				flag = flag2;
+			}
+			if (flag)
+			{
+				return null;
+			}
+			return Value("ATK BITMOUSE HID", p2[7]);
+		}
+		case "AulaKeyboard":
+		{
+			int num4 = (Header(new byte[3] { 0, 85, 16 }) ? 1 : ((!Header(new byte[2] { 85, 16 })) ? (-1) : 0));
+			bool flag = num4 < 0 || p2.Length <= num4 + 25;
+			if (!flag)
+			{
+				byte b2 = p2[num4 + 25];
+				bool flag2 = ((b2 > 100 || b2 == 0) ? true : false);
+				flag = flag2;
+			}
+			if (flag)
+			{
+				return null;
+			}
+			return Value("AULA 键盘 HID", p2[num4 + 25]);
+		}
+		case "AulaMouse":
+		{
+			bool flag = p2.Length < 10 || !Header(new byte[4] { 4, 0, 0, 26 }) || p2[5] != 0 || p2[6] != 0;
+			byte b2;
+			if (!flag)
+			{
+				b2 = p2[8];
+				bool flag2 = ((b2 > 100 || b2 == 0) ? true : false);
+				flag = flag2;
+			}
+			if (flag || p2[9] > 2)
+			{
+				return null;
+			}
+			int? percent = p2[8];
+			b2 = p2[9];
+			flag = (uint)(b2 - 1) <= 1u;
+			return Value("AULA Evision HID", percent, flag, "接收器电量；无线在线状态待确认")with
+			{
+				Connected = null,
+				Cached = true
+			};
+		}
+		case "MchoseMouse":
+		{
+			bool flag = p2.Length < 13;
+			if (!flag)
+			{
+				byte b2 = p2[0];
+				bool flag2 = (uint)(b2 - 17) <= 1u;
+				flag = !flag2;
+			}
+			if (flag || p2[1] != 249)
+			{
+				return null;
+			}
+			byte[] array = (from b in p2.Skip(2)
+				select (byte)(b ^ 0xFFu)).ToArray();
+			int num = array[0] | (array[1] << 8);
+			flag = ((num == 14391 || num == 21075) ? true : false);
+			if (!flag || array[9] > 100 || array[10] > 1)
+			{
+				return null;
+			}
+			return Value("MCHOSE Realtek HID", array[9], array[10] == 1);
+		}
+		case "MchoseG7":
+			if (p2.Length < 10 || !Header(new byte[2] { 170, 48 }) || p2[8] > 100 || p2[9] > 1)
+			{
+				return null;
+			}
+			return Value("MCHOSE G7 HID", p2[8], p2[9] == 1, "设备原始读数（可能抖动）");
+		case "MchoseA5":
+		{
+			int num4 = ((!Header(new byte[1] { 161 })) ? (Header(new byte[2] { 0, 161 }) ? 1 : (-1)) : 0);
+			if (num4 < 0 || p2.Length < num4 + 8 || p2[num4 + 4] != 0 || p2[num4 + 5] != 131 || p2[num4 + 7] > 100)
+			{
+				return null;
+			}
+			return Value("MCHOSE A5 HID", p2[num4 + 7], p2[num4 + 6] != 0);
+		}
+		case "MchoseKeyboard":
+			if (p2.Length < 20 || !Header(new byte[3] { 19, 74, 1 }) || p2[5] > 100 || (byte)p2.Take(19).Sum((byte b) => b) != p2[19])
+			{
+				return null;
+			}
+			return Value("MCHOSE K87 HID", p2[5]);
+		case "MchoseV9":
+			if (p2.Length < 4 || !Header(new byte[2] { 85, 101 }) || p2[2] > 100)
+			{
+				return null;
+			}
+			return Value("MCHOSE V9 HID", p2[2], (p2[3] == 0) ? new bool?(true) : ((p2[3] == 2) ? new bool?(false) : null));
+		case "MchoseTurbo":
+		{
+			bool flag = Header(new byte[2] { 85, 101 }) && p2.Length >= 4 && p2[2] <= 100;
+			if (flag)
+			{
+				byte b2 = p2[3];
+				bool flag2 = (uint)(b2 - 2) <= 2u;
+				flag = flag2;
+			}
+			if (flag)
+			{
+				return Value("MCHOSE Turbo HID", p2[2], (p2[3] == 2) ? new bool?(false) : null);
+			}
+			if (p2.Length < 11 || !Header(new byte[3] { 85, 170, 1 }) || p2[3] > 1 || p2[4] < 3 || p2.Length < 8 + p2[4] || p2[5] != 0 || p2[6] != 1 || p2[7] != 11 || p2[8] == 0 || (p2[9] & 0x7F) > 100)
+			{
+				return null;
+			}
+			int num5 = p2[3] ^ p2[4] ^ p2[5] ^ p2[6] ^ p2[7];
+			for (int i = 8; i < 7 + p2[4]; i++)
+			{
+				num5 ^= p2[i];
+			}
+			if (p2[7 + p2[4]] != ((p2[3] == 1) ? num5 : 0))
+			{
+				return null;
+			}
+			return Value("MCHOSE Turbo HID", p2[9] & 0x7F);
+		}
+		case "HyperXCloud2":
+		case "HyperXKingston":
+			if (p2.Length < 8 || !((reader == "HyperXCloud2") ? Header(new byte[4] { 6, 255, 187, 2 }) : Header(new byte[4] { 11, 0, 187, 2 })) || p2[7] > 100)
+			{
+				return null;
+			}
+			return Value("HyperX Cloud II HID", p2[7]);
+		case "HyperXCloud3":
+		{
+			bool flag = p2.Length < 5 || p2[0] != 102;
+			if (!flag)
+			{
+				byte b2 = p2[1];
+				bool flag2 = ((b2 == 13 || b2 == 137) ? true : false);
+				flag = !flag2;
+			}
+			if (flag || (p2[2] == 0 && p2[3] == 0) || p2[4] > 100)
+			{
+				return null;
+			}
+			return Value("HyperX Cloud III HID", p2[4]);
+		}
+		case "HyperXCloud3S":
+			if (p2.Length < 7 || !Header(new byte[1] { 12 }) || p2[5] != 6 || p2[6] > 100)
+			{
+				return null;
+			}
+			return Value("HyperX Cloud III S HID", p2[6]);
+		case "HyperXAlpha":
+			if (p2.Length < 4 || !Header(new byte[3] { 33, 187, 11 }) || p2[3] > 100)
+			{
+				return null;
+			}
+			return Value("HyperX Cloud Alpha HID", p2[3]);
+		case "HyperXHaste":
+		case "HyperXAlpha2":
+			if (p2.Length < ((reader == "HyperXHaste") ? 10 : 7) || !Header(new byte[2] { 81, 2 }) || p2[2] > 100)
+			{
+				return null;
+			}
+			return Value("HyperX NGENUITY HID", p2[2], (reader == "HyperXAlpha2") ? new bool?((p2[6] & 0x80) != 0) : Charge(p2[3]));
+		case "HyperXFlight":
+		{
+			int num2 = p2.Length;
+			if ((num2 != 15 && num2 != 20) || 1 == 0)
+			{
+				return null;
+			}
+			int num3 = (p2[3] << 8) | p2[4];
+			if ((num3 < 2500 || num3 > 5000) ? true : false)
+			{
+				return null;
+			}
+			if (num3 > 4107)
+			{
+				return Value("HyperX Cloud Flight HID", null, true, "充电中；电压不能换算实时百分比");
+			}
+			double a = ((num3 <= 3648) ? (1.0 / 800.0 * (double)num3) : ((num3 > 3975) ? 100.0 : (2.547505E-08 * Math.Pow(num3, 4.0) - 0.0003900299 * Math.Pow(num3, 3.0) + 2.238321 * (double)num3 * (double)num3 - 5706.256 * (double)num3 + 5452299.0)));
+			return Value("HyperX Cloud Flight 电压估计", Math.Clamp((int)Math.Round(a), 0, 100), false, "电压换算估计，非设备直报百分比");
+		}
+		case "LogitechCenturion":
+			if (p2.Length < 13 || !Header(new byte[2] { 81, 11 }) || p2[8] != 4 || p2[10] > 100)
+			{
+				return null;
+			}
+			return Value("Logitech Centurion HID", p2[10], p2[12] == 2);
+		default:
+			return null;
+		}
+		bool Header(byte[] prefix)
+		{
+			return p2.AsSpan().StartsWith(prefix);
+		}
+	}
+
+	internal static bool? Charge(byte state)
+	{
+		switch (state)
+		{
+		case 0:
+			return false;
+		case 1:
+		case 2:
+			return true;
+		default:
+			return null;
+		}
+	}
+
+	internal static bool? Charging(string reader, byte[] p)
+	{
+		bool flag = reader == "HyperXCloud3" && p.Length >= 3 && p[0] == 102;
+		if (flag)
+		{
+			byte b = p[1];
+			bool flag2 = ((b == 12 || b == 138) ? true : false);
+			flag = flag2;
+		}
+		if (flag)
+		{
+			return Charge(p[2]);
+		}
+		if (reader == "HyperXCloud3S" && p.Length >= 7 && p[0] == 12 && p[5] == 72)
+		{
+			return Charge(p[6]);
+		}
+		flag = ((reader == "HyperXCloud2" || reader == "HyperXKingston") ? true : false);
+		bool num;
+		if (flag && p.Length >= 5 && p[2] == 187 && p[3] == 3)
+		{
+			if (!(reader == "HyperXCloud2"))
+			{
+				if (p[0] == 11)
+				{
+					num = p[1] == 0;
+					goto IL_00db;
+				}
+			}
+			else if (p[0] == 6)
+			{
+				num = p[1] == byte.MaxValue;
+				goto IL_00db;
+			}
+		}
+		goto IL_00e6;
+		IL_00db:
+		if (num)
+		{
+			return Charge(p[4]);
+		}
+		goto IL_00e6;
+		IL_00e6:
+		if (reader == "HyperXAlpha" && p.Length >= 4 && p.AsSpan().StartsWith(new byte[3] { 33, 187, 12 }) && p[3] <= 1)
+		{
+			return p[3] == 1;
+		}
+		if (reader == "AtkBitmouse" && p.Length >= 8 && p[0] == 8 && p[1] == 114 && p[2] != byte.MaxValue && p[5] == 15 && p[6] >= 1 && p[7] <= 1)
+		{
+			return p[7] == 1;
+		}
+		return null;
+	}
 }

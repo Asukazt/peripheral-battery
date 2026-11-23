@@ -10,7 +10,8 @@ namespace PeriDock;
 
 internal static class Program
 {
-    internal const string AppName = "Peripheral Battery Preview";
+    internal const string AppName = "Peripheral Battery";
+    internal const string Version = "0.3.0";
     [STAThread]
     static int Main(string[] args)
     {
@@ -22,7 +23,9 @@ internal static class Program
             {
                 if (args[0] is "--discover" or "--discover-known")
                 {
-                    var known = args[0] == "--discover-known" ? JsonSerializer.Deserialize<DeviceTarget[]>(Console.In.ReadToEnd()) : null;
+                    var known = args[0] == "--discover-known"
+                        ? JsonSerializer.Deserialize<DeviceTarget[]>(Console.In.ReadToEnd())
+                        : null;
                     Console.WriteLine(JsonSerializer.Serialize(DeviceReader.Discover(known).GetAwaiter().GetResult()));
                 }
                 else
@@ -39,7 +42,88 @@ internal static class Program
             try { Console.WriteLine(JsonSerializer.Serialize(DeviceReader.Probe(args[1]).GetAwaiter().GetResult())); return 0; }
             catch (Exception ex) { Console.Error.WriteLine(Diagnostics.Redact(ex.GetType().Name + ": " + ex.Message)); return 1; }
         }
-        using var instance = new Mutex(true, @"Local\PeriDock-Compatibility-Preview-" + DeviceCatalog.Key(root), out var created);
+        if (args.Length >= 2 && args[0] == "--anc")
+        {
+            try
+            {
+                var result = args[1] == "set" && args.Length == 4
+                    ? DeviceReader.SetHeadsetAnc(int.Parse(args[2]), int.Parse(args[3])).GetAwaiter().GetResult()
+                    : DeviceReader.ReadHeadsetAnc().GetAwaiter().GetResult();
+                Console.WriteLine(JsonSerializer.Serialize(result));
+                return result.Success ? 0 : 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine(Diagnostics.Redact(ex.GetType().Name + ": " + ex.Message)); return 1; }
+        }
+        if (args.Length == 3 && args[0] == "--dpi" && args[1] == "set")
+        {
+            try
+            {
+                var dpi = int.Parse(args[2]);
+                var target = DeviceReader.Discover().GetAwaiter().GetResult()
+                    .FirstOrDefault(t => t.Kind == "mouse" && t.Profile?.Reader == "RazerFeature")
+                    ?? throw new IOException("未发现可调 DPI 的鼠标");
+                var value = DeviceReader.SetMouseDpi(target, dpi, dpi);
+                Console.WriteLine(JsonSerializer.Serialize(new { value.X, value.Y }));
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine(Diagnostics.Redact(ex.GetType().Name + ": " + ex.Message)); return 1; }
+        }
+        if (args.Length == 1 && args[0] == "--audio")
+        {
+            try
+            {
+                var items = new[] { AudioFlow.Render, AudioFlow.Capture }
+                    .Select(flow => new
+                    {
+                        Flow = flow.ToString(),
+                        Devices = AudioControl.List(flow).Select(d => new
+                        {
+                            d.Id, d.Name, d.IsDefault,
+                            Volume = AudioControl.Volume(d.Id, flow),
+                            Muted = AudioControl.Muted(d.Id, flow)
+                        })
+                    });
+                Console.WriteLine(JsonSerializer.Serialize(items));
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine(Diagnostics.Redact(ex.GetType().Name + ": " + ex.Message)); return 1; }
+        }
+        if (args.Length == 2 && args[0] == "--audio-default")
+        {
+            try
+            {
+                var flow = args[1] == "capture" ? AudioFlow.Capture : AudioFlow.Render;
+                var endpoint = AudioControl.PickHeadset(flow) ?? throw new IOException("未发现音频设备");
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    endpoint.Id, endpoint.Name,
+                    Ok = AudioControl.SetDefault(endpoint.Id, flow)
+                }));
+                return 0;
+            }
+            catch (Exception ex) { Console.Error.WriteLine(Diagnostics.Redact(ex.GetType().Name + ": " + ex.Message)); return 1; }
+        }
+        if (args.Length == 4 && args[0] == "--audio-set")
+        {
+            try
+            {
+                var flow = args[1] == "capture" ? AudioFlow.Capture : AudioFlow.Render;
+                var endpoint = AudioControl.PickHeadset(flow) ?? throw new IOException("未发现音频设备");
+                var volume = float.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture);
+                var muted = args[3] == "1";
+                var ok = AudioControl.SetVolume(endpoint.Id, flow, volume) && AudioControl.SetMuted(endpoint.Id, flow, muted);
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    endpoint.Id, endpoint.Name, Ok = ok,
+                    Volume = AudioControl.Volume(endpoint.Id, flow),
+                    Muted = AudioControl.Muted(endpoint.Id, flow),
+                    HResult = AudioControl.LastHResult
+                }));
+                return ok ? 0 : 1;
+            }
+            catch (Exception ex) { Console.Error.WriteLine(Diagnostics.Redact(ex.GetType().Name + ": " + ex.Message)); return 1; }
+        }
+        using var instance = new Mutex(true, @"Local\PeriDock-Widget", out var created);
         if (!created)
         {
             if (args.Contains("--startup")) return 0;
@@ -56,7 +140,7 @@ internal static class Program
             app.DispatcherUnhandledException += (_, e) =>
             {
                 log.Crash(e.Exception);
-                MessageBox.Show("发生错误，诊断文件已尝试保存到 " + log.LogFolder + "。", AppName, MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show("发生错误，诊断文件已尝试保存到程序目录的 logs 文件夹。", AppName, MessageBoxButton.OK, MessageBoxImage.Error);
                 app.Shutdown(1);
                 e.Handled = true;
             };
@@ -80,15 +164,19 @@ internal sealed class Controller
     readonly string root;
     readonly Diagnostics log;
     readonly OfficialProductImages productImages;
+    readonly BatteryUsageStore usage;
     readonly CancellationTokenSource stop = new();
     readonly Dictionary<string, int> misses = [];
     readonly Dictionary<string, DateTimeOffset> nextRead = [];
+    readonly HashSet<string> lowNotified = [];
     readonly DispatcherTimer refreshTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     readonly DispatcherTimer uiTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     readonly DispatcherTimer clickTimer = new() { Interval = TimeSpan.FromMilliseconds(Forms.SystemInformation.DoubleClickTime) };
     DockWindow host = null!;
     Popover popover = null!;
     DetailWindow details = null!;
+    SettingsWindow? controls;
+    BatteryStatsWindow? usageWindow;
     Forms.NotifyIcon tray = null!;
     Forms.ToolStripMenuItem dockOption = null!, startupOption = null!;
     UserSettings settings;
@@ -99,8 +187,11 @@ internal sealed class Controller
     internal Controller(string root, Diagnostics log)
     {
         this.root = root; this.log = log;
-        productImages = new(root, log);
         settings = UserSettings.Load(root, log);
+        productImages = new OfficialProductImages(root, log);
+        usage = new BatteryUsageStore(root, log);
+        HasHeadsetAncDevice = DeviceReader.HasHeadsetAncDevice();
+        ApplyThreshold();
     }
 
     internal void Start(bool showDetails, bool showPopover)
@@ -110,6 +201,8 @@ internal sealed class Controller
         host = new DockWindow(this);
         popover = new Popover(this); details = new DetailWindow(this);
         TrayMenu.Items.Add("查看详情", null, (_, _) => ShowDetails());
+        TrayMenu.Items.Add("电池使用统计", null, (_, _) => ShowBatteryUsage());
+        TrayMenu.Items.Add("外设设置", null, (_, _) => ShowSettings());
         dockOption = new Forms.ToolStripMenuItem("显示悬浮窗") { Checked = settings.ShowDock };
         dockOption.Click += (_, _) => SetDockVisible(!settings.ShowDock);
         TrayMenu.Items.Add(dockOption);
@@ -118,14 +211,17 @@ internal sealed class Controller
         TrayMenu.Items.Add(startupOption);
         TrayMenu.Opening += (_, _) => UpdateStartupOption();
         UpdateStartupOption();
-        try { StartupSettings.MigrateLegacy(Path.Combine(root, "PeriDock.exe")); UpdateStartupOption(); }
-        catch (Exception ex) { log.Write("error", "app", "migrate-startup", ex.Message, ex); message = "开机启动迁移失败 · 请重新启用开机启动"; }
         TrayMenu.Items.Add("刷新电量", null, (_, _) => _ = Refresh());
         var appearances = new Forms.ToolStripMenuItem("设备图片与颜色");
         TrayMenu.Opening += (_, _) =>
         {
-            appearances.DropDownItems.Clear(); appearances.Enabled = States.Count > 0;
-            foreach (var state in States) appearances.DropDownItems.Add(state.Name, null, (_, _) => ChooseAppearance(state));
+            appearances.DropDownItems.Clear();
+            appearances.Enabled = States.Count > 0;
+            foreach (var state in States)
+            {
+                var captured = state;
+                appearances.DropDownItems.Add(captured.Name, null, (_, _) => ChooseAppearance(captured));
+            }
         };
         TrayMenu.Items.Add(appearances);
         TrayMenu.Items.Add("打开日志", null, (_, _) => OpenLogs());
@@ -154,7 +250,7 @@ internal sealed class Controller
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         if (settings.ShowDock) host.Show();
         refreshTimer.Start(); uiTimer.Start();
-        log.Write("info", "app", "start", Program.AppName + " 0.2.0-preview.5-startup.1 started");
+        log.Write("info", "app", "start", Program.AppName + " " + Program.Version + " started");
         if (showDetails) ShowDetails();
         else if (showPopover) popover.OpenAt(Anchor(), true);
         _ = Refresh();
@@ -177,7 +273,8 @@ internal sealed class Controller
     {
         try
         {
-            startupOption.Checked = StartupSettings.IsEnabled(Path.Combine(root, "PeriDock.exe"));
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(StartupSettings.KeyPath);
+            startupOption.Checked = StartupSettings.IsEnabled(key, Path.Combine(root, "PeriDock.exe"));
         }
         catch (Exception ex) { log.Write("error", "app", "read-startup", ex.Message, ex); }
     }
@@ -185,8 +282,9 @@ internal sealed class Controller
     {
         try
         {
-            StartupSettings.SetEnabled(Path.Combine(root, "PeriDock.exe"), enabled);
-            UpdateStartupOption();
+            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(StartupSettings.KeyPath);
+            StartupSettings.SetEnabled(key, Path.Combine(root, "PeriDock.exe"), enabled);
+            startupOption.Checked = StartupSettings.IsEnabled(key, Path.Combine(root, "PeriDock.exe"));
         }
         catch (Exception ex) { SettingsError("save-startup", ex); }
     }
@@ -236,6 +334,106 @@ internal sealed class Controller
         if (details.WindowState == WindowState.Minimized) details.WindowState = WindowState.Normal;
         details.Activate();
     }
+    internal void ShowSettings()
+    {
+        clickTimer.Stop(); popover.Pinned = false; popover.Hide();
+        HasHeadsetAncDevice = DeviceReader.HasHeadsetAncDevice();
+        if (controls is null) controls = new SettingsWindow(this);
+        else controls.ReloadAudio();
+        controls.Show();
+        if (controls.WindowState == WindowState.Minimized) controls.WindowState = WindowState.Normal;
+        controls.Activate();
+        _ = Refresh(false);
+        _ = RefreshHeadsetAnc();
+    }
+    internal void ShowBatteryUsage()
+    {
+        clickTimer.Stop(); popover.Pinned = false; popover.Hide();
+        if (usageWindow is null) usageWindow = new BatteryStatsWindow(this);
+        else usageWindow.Update();
+        usageWindow.Show();
+        if (usageWindow.WindowState == WindowState.Minimized) usageWindow.WindowState = WindowState.Normal;
+        usageWindow.Activate();
+        _ = Refresh(false);
+    }
+    internal UserSettings Settings => settings;
+    internal BatteryUsageStore Usage => usage;
+    internal DeviceReader.AncReading? HeadsetAnc { get; private set; }
+    internal bool HasHeadsetAncDevice { get; private set; }
+    internal DeviceTarget? DpiTarget { get; set; }
+    internal bool HasAnyMouse => targets.Values.Any(t => t.Kind == "mouse");
+    internal void UpdateSettings(UserSettings next)
+    {
+        try
+        {
+            next.Save(root);
+            settings = next;
+            ApplyThreshold();
+            lowNotified.Clear();
+            message = "设置已保存";
+            // The next refresh will alert immediately if a device is already below the new threshold.
+            _ = Refresh(false);
+            UpdateViews();
+        }
+        catch (Exception ex) { SettingsError("save-settings", ex); }
+    }
+    void ApplyThreshold()
+    {
+        foreach (var state in States.Where(s => s.Supported))
+            state.LowThreshold = settings.ThresholdFor(state.Id, state.Kind);
+    }
+    internal async Task RefreshHeadsetAnc()
+    {
+        HasHeadsetAncDevice = DeviceReader.HasHeadsetAncDevice();
+        try
+        {
+            HeadsetAnc = await DeviceReader.ReadHeadsetAnc();
+            log.Write(HeadsetAnc.Success ? "info" : "error", "headset", "anc-read",
+                HeadsetAnc.Success ? $"ANC={HeadsetAnc.Status}; level={HeadsetAnc.Level}" : HeadsetAnc.Message);
+        }
+        catch (Exception ex) { HeadsetAnc = new(false, 0, 4, Diagnostics.Redact(ex.Message)); }
+        UpdateViews();
+    }
+    internal async Task<bool> SetHeadsetAnc(int status, int level)
+    {
+        try
+        {
+            var result = await DeviceReader.SetHeadsetAnc(status, level);
+            HeadsetAnc = result;
+            log.Write(result.Success ? "info" : "error", "headset", "anc-set",
+                result.Success ? $"ANC={result.Status}; level={result.Level}" : result.Message);
+            UpdateViews();
+            return result.Success && result.Status == status && result.Level == level;
+        }
+        catch (Exception ex)
+        {
+            log.Write("error", "headset", "anc-set", ex.Message, ex);
+            HeadsetAnc = new(false, 0, 4, Diagnostics.Redact(ex.Message));
+            UpdateViews();
+            return false;
+        }
+    }
+    internal async Task<(bool Ok, string Message)> SetMouseDpi(int dpi)
+    {
+        try
+        {
+            var target = DpiTarget ?? throw new IOException("未发现可调 DPI 的鼠标");
+            var value = await Task.Run(() => DeviceReader.SetMouseDpi(target, dpi, dpi));
+            var mouse = States.First(s => s.Id == target.Id);
+            mouse.ApplyDpi(value.X, value.Y);
+            log.Write("info", "mouse", "dpi-set", $"{value.X} × {value.Y} DPI");
+            message = "DPI 已生效";
+            UpdateViews();
+            return (true, $"DPI 已设置为 {value.X}");
+        }
+        catch (Exception ex)
+        {
+            log.Write("error", "mouse", "dpi-set", ex.Message, ex);
+            message = "DPI 设置失败";
+            UpdateViews();
+            return (false, "DPI 设置失败：" + Diagnostics.Redact(ex.Message));
+        }
+    }
     internal async Task Refresh(bool force = true)
     {
         if (refreshing || Exiting) return;
@@ -243,22 +441,28 @@ internal sealed class Controller
         var errors = new List<string>();
         try
         {
-            var discovered = await DeviceReader.DiscoverIsolated(stop.Token, targets.Values);
+            var discovered = await DeviceReader.DiscoverIsolated(stop.Token);
             if (Exiting) return;
             foreach (var target in discovered)
             {
                 targets[target.Id] = target;
                 if (States.All(s => s.Id != target.Id))
                 {
-                    States.Add(new(target.Id, target.Name, target.Name, target.Kind));
+                    var state = new BatteryState(target.Id, target.Name, target.Name, target.Kind)
+                    {
+                        LowThreshold = settings.ThresholdFor(target.Id, target.Kind),
+                        Supported = target.Supported
+                    };
+                    States.Add(state);
                     log.Write("info", target.Id, "discover", target.Name + "; " + target.Kind + "; " + target.HardwareId +
-                        "; " + (target.Supported ? "adapter available; hardware verification required" : "battery protocol unavailable"));
+                        "; " + (target.Supported ? "protocol available" : "battery protocol unavailable"));
                 }
             }
             var removed = States.Where(s => discovered.All(t => t.Id != s.Id)).ToArray();
             foreach (var state in removed)
             {
-                States.Remove(state); targets.Remove(state.Id); misses.Remove(state.Id); nextRead.Remove(state.Id);
+                States.Remove(state); targets.Remove(state.Id);
+                misses.Remove(state.Id); nextRead.Remove(state.Id); lowNotified.Remove(state.Id);
             }
             States.Sort((a, b) =>
             {
@@ -266,77 +470,89 @@ internal sealed class Controller
                 var order = Order(a).CompareTo(Order(b));
                 return order == 0 ? string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase) : order;
             });
+            HasHeadsetAncDevice = DeviceReader.HasHeadsetAncDevice();
+            DpiTarget = discovered.FirstOrDefault(t => t.Kind == "mouse" && t.Reader == "RazerFeature");
+            ApplyThreshold();
             UpdateViews();
-            foreach (var state in States.Where(s => s.ProductImagePath is null)) _ = LoadProductImage(state);
-            using var probeSlots = new SemaphoreSlim(3);
+            foreach (var state in States.Where(s => s.ProductImagePath is null))
+                _ = LoadProductImage(state);
+            using var slots = new SemaphoreSlim(3);
             var jobs = States.Where(s => force || !nextRead.TryGetValue(s.Id, out var due) || due <= DateTimeOffset.UtcNow)
                 .Select(async state =>
                 {
                     var acquired = false;
                     try
                     {
-                        await probeSlots.WaitAsync(stop.Token);
+                        await slots.WaitAsync(stop.Token);
                         acquired = true;
                         var target = targets[state.Id];
-                        var reading = await DeviceReader.RunTargetIsolated(target, stop.Token);
-                        state.Apply(reading, DateTimeOffset.UtcNow);
+                        var reading = target.Supported ? await DeviceReader.RunTargetIsolated(target, stop.Token) :
+                            new Reading(null, null, null, null, "HID " + target.HardwareId,
+                                "已识别型号；电量协议尚未适配", ChargingNote: "未向未知型号发送查询");
+                        var now = DateTimeOffset.UtcNow;
+                        state.Apply(reading, now);
+                        usage.Record(state, now);
                         var missed = !state.LastReadSucceeded;
                         misses[state.Id] = missed ? misses.GetValueOrDefault(state.Id) + 1 : 0;
                         if (missed && misses[state.Id] >= 3) nextRead[state.Id] = DateTimeOffset.UtcNow.AddSeconds(120);
                         else nextRead.Remove(state.Id);
-                        log.Write(reading.Failure == ReadFailure.AccessDenied ? "error" : "info", state.Id, "read",
-                            $"{target.HardwareId}; Win32={reading.ErrorCode}; {state.PercentText}; {state.Connection}; {state.Status}; charging={state.Charging?.ToString() ?? "unknown"}; {state.ChargingNote}; {state.DpiText}");
+                        log.Write("info", state.Id, "read",
+                            $"{state.PercentText}; {state.Connection}; {state.Status}; charging={state.Charging?.ToString() ?? "unknown"}; {state.ChargingNote}; {state.DpiText}");
                     }
                     catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
                     catch (Exception ex)
                     {
                         var reason = ex is OperationCanceledException ? "设备查询超时" : Diagnostics.Redact(ex.Message);
-                        state.Apply(new(null, null, null, null, state.Source, reason,
-                            Connection: state.Connection == "识别中" ? targets[state.Id].Connection : state.Connection,
-                            Failure: ReadFailure.ReadError), DateTimeOffset.UtcNow);
+                        state.Apply(new(null, null, null, null, state.Source, reason), DateTimeOffset.UtcNow);
                         misses[state.Id] = misses.GetValueOrDefault(state.Id) + 1;
                         nextRead[state.Id] = DateTimeOffset.UtcNow.AddSeconds(misses[state.Id] >= 3 ? 120 : 30);
                         errors.Add(state.ShortName);
                         log.Write("error", state.Id, "read", reason, ex);
                     }
-                    finally { if (acquired) probeSlots.Release(); }
+                    finally { if (acquired) slots.Release(); }
                     UpdateViews();
                 }).ToArray();
             await Task.WhenAll(jobs);
             if (Exiting) return;
-            message = States.Count == 0 ? "未发现受支持品牌的外设" : errors.Count > 0 ? "读取异常 · 已记录日志" :
-                States.Any(s => s.Failure == ReadFailure.AccessDenied) ?
-                    (Elevation.IsElevated ? "管理员权限下仍被拒绝 · 请检查驱动或设备接口" : "访问被拒绝 · 请使用管理员权限启动程序") :
+            message = States.Count == 0 ? "未发现已适配外设" : errors.Count > 0 ? "读取异常 · 已记录日志" :
                 States.Any(s => !s.LastReadSucceeded) ? "部分设备未响应" :
                 States.Any(s => s.Cached) ? "部分电量为系统缓存" : "暂无错误";
             var path = Path.Combine(root, "data", "status.json");
             var temp = path + ".tmp";
             await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(States, new JsonSerializerOptions { WriteIndented = true }));
             File.Move(temp, path, true);
+            CheckLowBattery();
         }
-        catch (Exception ex) when (!Exiting)
-        {
-            foreach (var state in States)
-                state.Apply(new(null, null, null, null, state.Source, "设备发现失败；本次读数无效",
-                    Connection: state.Connection, Failure: ReadFailure.ReadError), DateTimeOffset.UtcNow);
-            log.Write("error", "app", "refresh", ex.Message, ex); message = "更新异常 · 已记录日志";
-        }
+        catch (Exception ex) when (!Exiting) { log.Write("error", "app", "refresh", ex.Message, ex); message = "更新异常 · 已记录日志"; }
         finally { refreshing = false; if (!Exiting) UpdateViews(); }
     }
     async Task LoadProductImage(BatteryState state)
     {
-        var selected = settings.ImageChoices?.GetValueOrDefault(OfficialProductImages.FileKey(state.Name)) ?? "auto";
+        var key = OfficialProductImages.FileKey(state.Name);
+        var selected = settings.ImageChoices.GetValueOrDefault(key) ?? "auto";
+        if (selected == "generic")
+        {
+            if (!state.GenericImage) { state.GenericImage = true; UpdateViews(); }
+            return;
+        }
         try
         {
+            string? path;
             var custom = OfficialProductImages.CustomPath(root, state.Name);
-            var file = selected == "custom" && File.Exists(custom) ? custom :
-                selected == "auto" ? await productImages.GetAsync(state.Name, stop.Token) : selected == "generic" ? null :
-                (await productImages.GetOptionsAsync(state.Name, stop.Token)).FirstOrDefault(o => o.Id == selected)?.FilePath ??
-                    await productImages.GetAsync(state.Name, stop.Token);
-            if (!Exiting && file is not null && state.ProductImagePath != file &&
-                selected == (settings.ImageChoices?.GetValueOrDefault(OfficialProductImages.FileKey(state.Name)) ?? "auto"))
+            if (selected == "custom" && File.Exists(custom)) path = custom;
+            else if (selected == "generic") path = null;
+            else if (selected == "auto") path = await productImages.GetAsync(state.Name, stop.Token);
+            else
             {
-                state.ProductImagePath = file;
+                var option = (await productImages.GetOptionsAsync(state.Name, stop.Token))
+                    .FirstOrDefault(o => o.Id == selected);
+                path = option?.FilePath ?? await productImages.GetAsync(state.Name, stop.Token);
+            }
+            if (!Exiting && path is not null && state.ProductImagePath != path &&
+                selected == (settings.ImageChoices.GetValueOrDefault(key) ?? "auto"))
+            {
+                state.ProductImagePath = path;
+                state.GenericImage = false;
                 UpdateViews();
             }
         }
@@ -345,27 +561,58 @@ internal sealed class Controller
     internal void ChooseAppearance(BatteryState state)
     {
         var key = OfficialProductImages.FileKey(state.Name);
-        var window = new AppearanceWindow(state, settings.ImageChoices?.GetValueOrDefault(key) ?? "auto",
-            () => productImages.GetOptionsAsync(state.Name, stop.Token), choice =>
+        new AppearanceWindow(state, settings.ImageChoices.GetValueOrDefault(key) ?? "auto",
+            () => productImages.GetOptionsAsync(state.Name, stop.Token),
+            choice =>
             {
                 try
                 {
-                    var selections = new Dictionary<string, string>(settings.ImageChoices ?? []);
-                    selections[key] = choice.Id;
-                    var next = settings with { ImageChoices = selections }; next.Save(root); settings = next;
-                    foreach (var device in States.Where(s => OfficialProductImages.FileKey(s.Name) == key)) device.ProductImagePath = choice.FilePath;
-                    UpdateViews(); return true;
+                    settings = settings with
+                    {
+                        ImageChoices = new(settings.ImageChoices) { [key] = choice.Id }
+                    };
+                    settings.Save(root);
+                    foreach (var item in States.Where(s => OfficialProductImages.FileKey(s.Name) == key))
+                    {
+                        item.ProductImagePath = choice.FilePath;
+                        item.GenericImage = choice.Id == "generic";
+                    }
+                    UpdateViews();
+                    return true;
                 }
-                catch (Exception ex) { SettingsError("save-image-choice", ex); return false; }
-            }, file => productImages.ImportAsync(state.Name, file, stop.Token));
-        window.Show();
+                catch (Exception ex)
+                {
+                    SettingsError("save-image-choice", ex);
+                    return false;
+                }
+            },
+            file => productImages.ImportAsync(state.Name, file, stop.Token)).Show();
     }
     void UpdateViews()
     {
         if (Exiting) return;
         host.Update(States); popover.Update(States, refreshing); details.Update(States, refreshing, message);
-        var summary = string.Join(" · ", States.Select(s => s.TrayText));
-        tray.Text = summary.Length == 0 ? Program.AppName + " · 未发现外设" : summary.Length < 63 ? summary : summary[..60] + "…";
+        usageWindow?.Update();
+        controls?.Update();
+        var summary = string.Join(" · ", States.GroupBy(s => s.Kind).Select(g =>
+            g.Key switch { "keyboard" => "键盘", "mouse" => "鼠标", "headset" => "耳机", _ => "设备" }
+            + "：" + string.Join("/", g.Select(s => s.PercentText))));
+        tray.Text = summary.Length == 0 ? Program.AppName + " · 未发现外设" :
+            summary.Length < 63 ? summary : summary[..60] + "…";
+    }
+    void CheckLowBattery()
+    {
+        if (!settings.LowBatteryAlert) return;
+        foreach (var state in States)
+        {
+            var low = state.LastReadSucceeded && !state.IsStale(DateTimeOffset.UtcNow) &&
+                state.Connected != false && state.Charging != true && state.IsLow;
+            if (!low) { lowNotified.Remove(state.Id); continue; }
+            if (!lowNotified.Add(state.Id)) continue;
+            tray.ShowBalloonTip(6000, Program.AppName,
+                $"{state.ShortName} 电量低于 {state.LowThreshold}%：{state.PercentText}",
+                Forms.ToolTipIcon.Warning);
+        }
     }
     internal void OpenLogs()
     {
@@ -388,7 +635,8 @@ internal sealed class Controller
         refreshTimer.Stop(); uiTimer.Stop(); clickTimer.Stop();
         Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerChanged;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
-        tray.Visible = false; tray.Dispose(); host.Close(); popover.Close(); details.Close(); TrayMenu.Dispose();
+        tray.Visible = false; tray.Dispose(); host.Close(); popover.Close(); details.Close();
+        controls?.Close(); usageWindow?.Close(); TrayMenu.Dispose();
         log.Write("info", "app", "exit", Program.AppName + " stopped");
         Application.Current.Shutdown();
     }

@@ -12,13 +12,14 @@ internal sealed class DeviceRow
 {
     internal Grid Root { get; } = new();
     readonly TextBlock percent, status, updated, extra;
-    readonly Image connectionIcon, product;
+    readonly Image connectionIcon;
     readonly Ellipse dot;
     readonly Border fill;
+    readonly Image image;
     readonly bool compact;
     readonly double barWidth;
 
-    internal DeviceRow(BatteryState state, bool compact, Controller controller)
+    internal DeviceRow(BatteryState state, bool compact, Action<BatteryState>? choose = null)
     {
         this.compact = compact;
         barWidth = compact ? 140 : 228;
@@ -26,9 +27,10 @@ internal sealed class DeviceRow
         Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(compact ? 86 : 220) });
         Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(compact ? 144 : 230) });
-        product = Product(state, compact ? 78 : 184, compact ? 74 : 128);
-        product.HorizontalAlignment = HorizontalAlignment.Center;
-        Root.Children.Add(ProductChoice(state, product, () => controller.ChooseAppearance(state)));
+        image = Product(state, compact ? 78 : 184, compact ? 74 : 128);
+        image.HorizontalAlignment = HorizontalAlignment.Center;
+        Root.Children.Add(choose is null ? image :
+            ProductChoice(state, image, () => choose(state)));
         var labels = new StackPanel
         {
             VerticalAlignment = VerticalAlignment.Center,
@@ -77,15 +79,15 @@ internal sealed class DeviceRow
 
     internal void Update(BatteryState state)
     {
-        UpdateProduct(product, state);
+        UpdateProduct(image, state);
         var stale = state.IsStale(DateTimeOffset.UtcNow);
         percent.Text = state.PercentText;
-        percent.Foreground = stale ? Muted : state.Percent <= 25 ? Amber : Ink;
+        percent.Foreground = stale ? Muted : state.IsLow ? Amber : Ink;
         fill.Width = barWidth * (state.Percent ?? 0) / 100d;
-        fill.Background = stale ? Muted : state.Percent <= 25 ? Amber : Green;
+        fill.Background = stale ? Muted : state.IsLow ? Amber : Green;
         extra.Text = state.Connection +
             (state.Kind == "mouse" ? " · " + state.DpiText + (state.DpiText == "未知" ? " DPI" : "") : "") +
-            (compact ? " · " + StateText(state) : "");
+            (compact && state.Charging == true ? " · 充电中" : "");
         var icon = state.Connection == "蓝牙" ? "bluetooth" :
             state.Connection == "USB" ? "usb" : state.Connection.Contains("2.4G") ? "radio-tower" : "ellipsis";
         connectionIcon.Source = IconSource(icon, state.Connection == "蓝牙" ? Brush("#6EA7DC") : Muted);
@@ -144,9 +146,9 @@ internal sealed class Popover : Window
             rowKey = key; rows.Clear(); list.Children.Clear();
             foreach (var state in states)
             {
-                var row = new DeviceRow(state, true, controller); rows.Add(row); list.Children.Add(row.Root);
+                var row = new DeviceRow(state, true, controller.ChooseAppearance); rows.Add(row); list.Children.Add(row.Root);
             }
-            if (states.Count == 0) list.Children.Add(Text("未发现受支持品牌的外设", 14, Muted));
+            if (states.Count == 0) list.Children.Add(Text("未发现已适配外设", 14, Muted));
         }
         for (var i = 0; i < rows.Count; i++) rows[i].Update(states[i]);
         refresh.IsEnabled = !refreshing;
@@ -230,13 +232,14 @@ internal sealed class DetailWindow : Window
         var commands = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         DockPanel.SetDock(commands, Dock.Left); bottom.Children.Add(commands);
         refresh = Command("refresh-cw", "刷新", () => _ = controller.Refresh()); commands.Children.Add(refresh);
+        commands.Children.Add(Command("battery-full", "电池统计", controller.ShowBatteryUsage));
         void Separator() => commands.Children.Add(new Border
         {
             Width = 1, Height = 24, Background = Line, Margin = new Thickness(12, 0, 12, 0)
         });
         Separator(); commands.Children.Add(Command("folder-open", "打开日志文件夹", controller.OpenLogs));
         Separator(); commands.Children.Add(Command("download", "导出诊断包", controller.Export));
-        commands.Children.Add(Command("ellipsis", "设置", () => controller.TrayMenu.Show(System.Windows.Forms.Cursor.Position), true));
+        commands.Children.Add(Command("ellipsis", "外设设置", controller.ShowSettings, true));
         var health = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         dot = Dot(10); dot.Margin = new Thickness(0, 0, 8, 0); health.Children.Add(dot);
         status = Text("正在读取…", 13, Muted);
@@ -261,9 +264,9 @@ internal sealed class DetailWindow : Window
             foreach (var state in states)
             {
                 if (rows.Count > 0) list.Children.Add(new Border { Height = 1, Background = Line });
-                var row = new DeviceRow(state, false, controller); rows.Add(row); list.Children.Add(row.Root);
+                var row = new DeviceRow(state, false, controller.ChooseAppearance); rows.Add(row); list.Children.Add(row.Root);
             }
-            if (states.Count == 0) list.Children.Add(Text("未发现受支持品牌的外设", 16, Muted));
+            if (states.Count == 0) list.Children.Add(Text("未发现已适配外设", 16, Muted));
         }
         for (var i = 0; i < rows.Count; i++) rows[i].Update(states[i]);
         refresh.IsEnabled = !refreshing;

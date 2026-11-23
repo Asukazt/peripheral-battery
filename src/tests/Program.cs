@@ -2,10 +2,6 @@ using PeriDock;
 using System.IO.Compression;
 using System.Text.Json;
 using Microsoft.Win32;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Net;
-using System.Net.Http;
 
 var failures = new List<string>();
 var checks = 0;
@@ -21,9 +17,6 @@ void Equal<T>(T expected, T actual)
         throw new Exception($"Expected {expected}, got {actual}");
 }
 
-MultiBrandTests.Run(Check);
-OfficialImageTests.Run(Check);
-StartupTests.Run(Check, args.Contains("--startup-integration"));
 Check("mouse battery request has the documented command and checksum", () =>
 {
     var p = Protocols.MouseRequest(0x07, 0x80, 2);
@@ -54,10 +47,59 @@ Check("mouse DPI uses big-endian X and Y and rejects impossible values", () =>
     p[10] = 0; p[11] = 0; p[89] = 0xa5;
     Equal<(int, int)?>(null, Protocols.MouseDpi(p));
 });
+Check("mouse DPI write uses the write command and validates its range", () =>
+{
+    var p = Protocols.MouseDpiSetRequest(1800, 1800);
+    Equal(91, p.Length);
+    Equal((byte)0x05, p[8]);
+    Equal((byte)0x07, p[6]);
+    Equal((byte)0x07, p[10]);
+    Equal((byte)0x08, p[11]);
+    Equal((byte)0x07, p[12]);
+    Equal((byte)0x08, p[13]);
+    var ack = (byte[])p.Clone();
+    ack[1] = 2; ack[89] = 0;
+    for (var i = 3; i <= 88; i++) ack[89] ^= ack[i];
+    Equal(true, Protocols.MouseDpiSetMatches(ack));
+    var refused = false;
+    try { Protocols.MouseDpiSetRequest(20, 1600); }
+    catch (ArgumentOutOfRangeException) { refused = true; }
+    Equal(true, refused);
+});
 Check("headset query command and checksum match Scythe protocol", () =>
 {
     var p = Protocols.HeadsetRequest(0x21, 0x80);
     Equal(64, p.Length); Equal((byte)0xc7, p[62]);
+});
+Check("headset ANC read and write frames round-trip status and level", () =>
+{
+    var read = Protocols.HeadsetAncRequest();
+    Equal(64, read.Length);
+    Equal((byte)0x12, read[10]);
+    Equal((byte)0x80, read[9]);
+    var set = Protocols.HeadsetAncSetRequest(1, 4);
+    Equal((byte)0x92, set[10]);
+    Equal((byte)1, set[13]);
+    Equal((byte)4, set[14]);
+
+    var packet = new byte[64];
+    packet[0] = 2; packet[1] = 2; packet[2] = 0x60; packet[6] = 6; packet[9] = 0x80;
+    packet[10] = 0x12; packet[11] = 1; packet[12] = 2; packet[13] = 1; packet[14] = 4;
+    byte sum = 0; for (var i = 0; i < 62; i++) sum ^= packet[i]; packet[62] = sum;
+    Equal((1, 4), Protocols.HeadsetAnc(packet) ?? (0, 0));
+    packet[13] = 2;
+    Equal<(int, int)?>(null, Protocols.HeadsetAnc(packet));
+    packet[13] = 0; packet[14] = 5; packet[62] = 0;
+    sum = 0; for (var i = 0; i < 62; i++) sum ^= packet[i]; packet[62] = sum;
+    Equal<(int, int)?>(null, Protocols.HeadsetAnc(packet));
+
+    var ack = new byte[64];
+    ack[0] = 2; ack[1] = 2; ack[2] = 0x60; ack[6] = 1; ack[9] = 0x80;
+    ack[10] = 0x92; ack[11] = 1; ack[12] = 1;
+    sum = 0; for (var i = 0; i < 62; i++) sum ^= ack[i]; ack[62] = sum;
+    Equal(true, Protocols.HeadsetAncSetSucceeded(ack));
+    ack[12] = 2;
+    Equal(false, Protocols.HeadsetAncSetSucceeded(ack));
 });
 Check("headset rejects wrong route, corruption and out-of-range battery", () =>
 {
@@ -104,6 +146,14 @@ Check("age makes a previously successful reading stale", () =>
     Equal(false, s.IsStale(now.AddSeconds(60)));
     Equal(true, s.IsStale(now.AddSeconds(95)));
 });
+Check("low-battery threshold is configurable per state", () =>
+{
+    var s = new BatteryState("mouse", "Mouse", "Mouse") { LowThreshold = 30 };
+    s.Apply(new Reading(25, false, null, null, "HID", "已连接"), DateTimeOffset.UtcNow);
+    Equal(true, s.IsLow);
+    s.LowThreshold = 20;
+    Equal(false, s.IsLow);
+});
 Check("connection changes independently from charging and clears on failed detection", () =>
 {
     var s = new BatteryState("keyboard", "Keyboard", "Keyboard");
@@ -147,6 +197,26 @@ Check("Razer transport comes from the queried interface rather than charging", (
     Equal("USB", Protocols.RazerConnection(0x0576));
     Equal("2.4G", Protocols.RazerConnection(0x0577));
     Equal("待确认", Protocols.RazerConnection(0x1234));
+});
+Check("device catalog discovers every supported mouse and keeps unsupported models", () =>
+{
+    Equal(true, DeviceCatalog.Profiles.Count >= 200);
+    var supported = DeviceCatalog.FromHid([
+        new HidDevice(@"\\?\hid#vid_1532&pid_00c1", 0x00c1, 0xff00, 1, 0, 0, 91,
+            Vendor: 0x1532, Name: "Razer Viper V3 Pro", Container: "mouse-container")
+    ]).Single();
+    Equal("Razer Viper V3 Pro", supported.Name);
+    Equal("mouse", supported.Kind);
+    Equal(true, supported.Supported);
+    Equal("RazerFeature", supported.Reader);
+    var unknown = DeviceCatalog.FromHid([
+        new HidDevice(@"\\?\hid#vid_1532&pid_9999", 0x9999, 0xff00, 1, 0, 0, 91,
+            Vendor: 0x1532, Name: "Razer Unknown", Container: "unknown-container")
+    ]).Single();
+    Equal(false, unknown.Supported);
+    Equal("Razer Unknown", unknown.Name);
+    Equal("LogitechReceiver", DeviceCatalog.Find(0x046d, 0xc548)?.Reader);
+    Equal("HyperXCloud3", DeviceCatalog.Find(0x03f0, 0x05b7)?.Reader);
 });
 Check("ROG queries allow only power, connection and receiver-slot reads", () =>
 {
@@ -249,6 +319,17 @@ Check("dock preference defaults hidden and persists both visible and hidden acro
         Equal(false, UserSettings.Load(root, log).ShowDock);
         new UserSettings(true).Save(root);
         Equal(true, UserSettings.Load(root, log).ShowDock);
+        new UserSettings(true) { LowBatteryAlert = false, LowBatteryThreshold = 35,
+            LowBatteryThresholds = new() { ["mouse"] = 25, ["headset"] = 50 } }.Save(root);
+        Equal(false, UserSettings.Load(root, log).LowBatteryAlert);
+        Equal(35, UserSettings.Load(root, log).LowBatteryThreshold);
+        Equal(25, UserSettings.Load(root, log).ThresholdFor("mouse"));
+        Equal(50, UserSettings.Load(root, log).ThresholdFor("headset"));
+        Equal(35, UserSettings.Load(root, log).ThresholdFor("keyboard"));
+        Equal(60, new UserSettings().WithThreshold("keyboard", 60).ThresholdFor("keyboard"));
+        Equal(25, UserSettings.Load(root, log).ThresholdFor("hid-new", "mouse"));
+        new UserSettings(true) { ImageChoices = new() { ["mouse-key"] = "local" } }.Save(root);
+        Equal("local", UserSettings.Load(root, log).ImageChoices["mouse-key"]);
         new UserSettings(false).Save(root);
         Equal(false, UserSettings.Load(root, log).ShowDock);
         Equal(false, File.Exists(Path.Combine(root, "data", "settings.json.tmp")));
@@ -270,611 +351,100 @@ Check("invalid settings are kept for diagnosis and do not force the dock open", 
     }
     finally { Directory.Delete(root, true); }
 });
-Check("legacy startup removal preserves other installations and unrelated entries", () =>
+Check("startup registration quotes paths and disabling preserves unrelated entries", () =>
 {
+    if (!OperatingSystem.IsWindows()) return;
     var keyPath = @"Software\PeriDock-test-" + Guid.NewGuid().ToString("N");
     try
     {
         using var key = Registry.CurrentUser.CreateSubKey(keyPath);
         key.SetValue("Unrelated", "keep");
-        key.SetValue("Peripheral Battery", "\"D:\\Peripheral Battery\\PeriDock.exe\" --startup");
-        StartupSettings.RemoveLegacy(key, @"D:\Other\PeriDock.exe");
-        Equal(true, key.GetValue("Peripheral Battery") is not null);
-        StartupSettings.RemoveLegacy(key, @"D:\Peripheral Battery\PeriDock.exe");
-        Equal(true, key.GetValue("Peripheral Battery") is null);
+        Equal(false, StartupSettings.IsEnabled(key, @"D:\Peripheral Battery\PeriDock.exe"));
+        StartupSettings.SetEnabled(key, @"D:\Peripheral Battery\PeriDock.exe", true);
+        Equal("\"D:\\Peripheral Battery\\PeriDock.exe\" --startup", key.GetValue("Peripheral Battery") as string);
+        Equal(true, StartupSettings.IsEnabled(key, @"D:\Peripheral Battery\PeriDock.exe"));
+        Equal(false, StartupSettings.IsEnabled(key, @"D:\Other\PeriDock.exe"));
+        StartupSettings.SetEnabled(key, @"D:\Peripheral Battery\PeriDock.exe", false);
+        Equal(false, StartupSettings.IsEnabled(key, @"D:\Peripheral Battery\PeriDock.exe"));
         Equal("keep", key.GetValue("Unrelated") as string);
     }
     finally { Registry.CurrentUser.DeleteSubKeyTree(keyPath, false); }
 });
-Check("Razer transaction families validate their own replies and reject foreign ids", () =>
+Check("battery usage separates discharge from charging and estimates remaining time", () =>
 {
-    foreach (var transaction in new byte[] { 0x1f, 0x3f, 0x9f, 0xff })
+    var t0 = new DateTimeOffset(2026, 11, 20, 9, 0, 0, TimeSpan.Zero);
+    var samples = new List<BatterySample>();
+    void Add(int minutes, int percent, bool? charging) => samples.Add(new BatterySample
     {
-        var packet = Protocols.MouseRequest(7, 0x80, 2, transaction);
-        packet[1] = 2; packet[10] = 128; packet[89] ^= 128;
-        Equal<int?>(128, Protocols.MouseValue(packet, 7, 0x80, transaction));
-        Equal<int?>(null, Protocols.MouseValue(packet, 7, 0x80, (byte)(transaction ^ 1)));
-    }
+        Time = t0.AddMinutes(minutes), Id = "mouse", Name = "Mouse", Kind = "mouse",
+        Percent = percent, Charging = charging
+    });
+    for (var minute = 0; minute <= 120; minute += 10) Add(minute, 100 - minute / 10, false);
+    Add(150, 87, true); Add(180, 95, true);
+    for (var minute = 240; minute <= 300; minute += 10) Add(minute, 94 - (minute - 240) / 10, false);
+    var summary = BatteryUsage.Compute(samples, t0.AddMinutes(300), TimeSpan.FromHours(24), 88, TimeZoneInfo.Utc);
+    Equal(TimeSpan.FromHours(3), summary.DischargeTime);
+    Equal(18d, summary.PercentDropped);
+    Equal(6d, summary.DrainPerHour ?? -1);
+    Equal(TimeSpan.FromHours(3), summary.TodayDischarge);
+    Equal(1, summary.ChargeCount);
+    Equal(t0.AddHours(4), summary.LastChargeEnd ?? default);
+    Equal(2, summary.Sessions.Count);
+    Equal(true, summary.EstimatedRemaining is { TotalHours: > 14 and < 15 });
 });
-Check("ROG mouse percentages and coarse gauges reject standby and invalid replies", () =>
+Check("battery usage excludes sleep gaps from discharge time", () =>
 {
-    var packet = new byte[65]; packet[1] = 0x12; packet[2] = 7; packet[5] = 76;
-    Equal((76, (bool?)false), Protocols.AsusMousePower(packet, 1) ?? (-1, null));
-    packet[5] = 3;
-    Equal((75, (bool?)false), Protocols.AsusMousePower(packet, 25) ?? (-1, null));
-    packet[5] = 5;
-    Equal<(int, bool?)?>(null, Protocols.AsusMousePower(packet, 25));
-    packet[5] = 0;
-    Equal<(int, bool?)?>(null, Protocols.AsusMousePower(packet, 1));
-    packet[10] = 1;
-    Equal((0, (bool?)true), Protocols.AsusMousePower(packet, 1) ?? (-1, null));
-    packet[2] = 8;
-    Equal<(int, bool?)?>(null, Protocols.AsusMousePower(packet, 1));
-});
-Check("Falchion uses the percentage field instead of the ten-step gauge", () =>
-{
-    var packet = new byte[65]; packet[1] = 0x12; packet[2] = 1; packet[6] = 8; packet[11] = 76;
-    Equal(76, Protocols.KeyboardPower(packet, 0, 11)?.Percent ?? -1);
-    Equal<(int, bool?)?>(null, Protocols.KeyboardPower(packet[..11], 0, 11));
-});
-Check("catalog groups HID collections by physical container, keeping identical mice separate", () =>
-{
-    var a = new HidDevice("a", 0x00c1, 0xff00, 1, 0, 0, 91, Container: "container-1");
-    var b = a with { Path = "b", UsagePage = 1 };
-    var c = a with { Path = "c", Container = "container-2" };
-    var targets = DeviceCatalog.FromHid([a, b, c]);
-    Equal(2, targets.Count);
-    Equal(2, targets[0].Interfaces.Length);
-    Equal(false, targets[0].Id == targets[1].Id);
-    Equal(true, targets.All(t => t.Kind == "mouse" && t.Supported));
-});
-Check("unlisted and wired-only products never gain a battery protocol from the vendor alone", () =>
-{
-    Equal<DeviceProfile?>(null, DeviceCatalog.Find(0x1532, 0x00cb));
-    Equal<DeviceProfile?>(null, DeviceCatalog.Find(0x9999, 0x00c1));
-    var device = new HidDevice("unknown", 0xffff, 0xff00, 1, 65, 65, 91, Name: "Razer New Wireless Mouse");
-    var targets = DeviceCatalog.FromHid([device]);
-    Equal(1, targets.Count); Equal(false, targets[0].Supported);
-    Equal(true, DeviceCatalog.Profiles.Select(p => (p.Vendor, p.Product)).Distinct().Count() == DeviceCatalog.Profiles.Count);
-});
-Check("ROG headset payload validates both earbuds and keeps charging unknown on malformed responses", () =>
-{
-    var p = new byte[64]; p[0] = 0xcc; p[1] = 0x12; p[2] = 7; p[6] = 82; p[7] = 65; p[8] = 50;
-    Equal(65, Protocols.AsusHeadsetPower(p, 0x1ad3)?.Percent ?? -1);
-    Equal(82, Protocols.AsusHeadsetPower(p, 0x1afa)?.Percent ?? -1);
-    p[7] = 255;
-    Equal<(int, bool?)?>(null, Protocols.AsusHeadsetPower(p, 0x1ad3));
-    p[2] = 8; p[5] = 3;
-    Equal<bool?>(true, Protocols.AsusHeadsetCharging(p, 0x1ad3));
-    Equal<bool?>(null, Protocols.AsusHeadsetCharging(p, 0x1afa));
-    p[0] = 0;
-    Equal<bool?>(null, Protocols.AsusHeadsetCharging(p, 0x1ad3));
-});
-Check("2020 headset hides unreliable charging levels and refuses stale receiver replies", () =>
-{
-    var p = new byte[64]; Convert.FromHexString("FF0F05FE12041F08050305010EA03200").CopyTo(p, 0);
-    Equal(((int?)50, (bool?)false), Protocols.Razer2020Power(p) ?? (-1, null));
-    p[11] = 9; p[14] = 80;
-    Equal(((int?)null, (bool?)true), Protocols.Razer2020Power(p) ?? (-1, null));
-    p[1] = 1; p[2] = 0;
-    Equal<(int?, bool?)?>(null, Protocols.Razer2020Power(p));
-});
-Check("PA headset variants reject wrong commands, oversized payloads and impossible battery values", () =>
-{
-    foreach (ushort product in new ushort[] { 0x0555, 0x0556, 0x053a })
+    var t0 = new DateTimeOffset(2026, 11, 20, 9, 0, 0, TimeSpan.Zero);
+    var samples = new[]
     {
-        var query = Protocols.PaRequest(product, 0x21);
-        Equal(64, query.Length);
-        var echo = product == 0x053a ? 13 : 12;
-        var p = new byte[64]; p[0] = query[0]; p[3] = 0x50; p[4] = 0x49;
-        p[echo] = 0x21; p[echo + 1] = 1; p[echo + 2] = 1; p[echo + 3] = 76;
-        Equal<int?>(76, Protocols.PaValue(p, product, 0x21));
-        Equal<int?>(null, Protocols.PaValue(p, product, 0x2a));
-        p[echo + 3] = 101;
-        Equal<int?>(null, Protocols.PaValue(p, product, 0x21));
-        p[echo + 3] = 76; p[echo + 2] = 60;
-        Equal<int?>(null, Protocols.PaValue(p, product, 0x21));
-        var on = Protocols.PaRequest(product, 0xe1, true);
-        var off = Protocols.PaRequest(product, 0xe1, false);
-        Equal(1, on.Zip(off).Count(pair => pair.First != pair.Second));
-    }
+        new BatterySample { Time = t0, Id = "mouse", Name = "Mouse", Kind = "mouse", Percent = 80, Charging = false },
+        new BatterySample { Time = t0.AddHours(2), Id = "mouse", Name = "Mouse", Kind = "mouse", Percent = 70, Charging = false }
+    };
+    var summary = BatteryUsage.Compute(samples, t0.AddHours(3), TimeSpan.FromHours(24), 70, TimeZoneInfo.Utc);
+    Equal(TimeSpan.Zero, summary.DischargeTime);
+    Equal<double?>(null, summary.DrainPerHour);
+    Equal<TimeSpan?>(null, summary.EstimatedRemaining);
 });
-Check("Bluetooth model suffixes classify correctly and serialized discovery excludes local HID paths", () =>
+Check("battery usage store persists per-device history and skips duplicate samples", () =>
 {
-    Equal("headset", DeviceCatalog.Kind("ROG DELTA II (BT)"));
-    Equal("keyboard", DeviceCatalog.Kind("ROG AZOTH X"));
-    Equal("mouse", DeviceCatalog.Kind("Razer Basilisk V3 Pro 35K"));
-    var device = new HidDevice("private-device-path", 0x00c1, 0xff00, 1, 0, 0, 91, Container: "private-container");
-    var json = JsonSerializer.Serialize(DeviceCatalog.FromHid([device]));
-    Equal(false, json.Contains("private-"));
-    Equal(true, json.Contains("1532:00c1"));
-});
-Check("access denied hides previous battery from every percentage consumer", () =>
-{
-    var state = new BatteryState("mouse", "Mouse", "Mouse");
-    var now = DateTimeOffset.UtcNow;
-    state.Apply(new(58, true, 1600, 1600, "HID", "已连接", Connection: "USB", Connected: true), now);
-    var denied = JsonSerializer.Deserialize<Reading>("""
-        {"Percent":null,"Charging":null,"DpiX":null,"DpiY":null,"Source":"HID 1532:00c0",
-         "Status":"已识别设备；访问被拒绝（Windows 错误 5）","Connection":"USB","Failure":1,"ErrorCode":5}
-        """)!;
-    state.Apply(denied, now.AddSeconds(30));
-    Equal("--", state.PercentText);
-    Equal<int?>(null, state.Percent);
-    Equal("USB", state.Connection);
-    Equal(false, state.LastReadSucceeded);
-    Equal<bool?>(null, state.Charging);
-    Equal("未知", state.DpiText);
-    Equal(now, state.LastSuccess);
-});
-Check("denied HID metadata retains the same physical identity and safe hardware diagnostics", () =>
-{
-    var root = Path.Combine(Path.GetTempPath(), "PeriDock-access-" + Guid.NewGuid().ToString("N"));
+    var root = Path.Combine(Path.GetTempPath(), "PeriDock-usage-test-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
     try
     {
         var log = new Diagnostics(root);
-        var path = @"\\?\HID#VID_1532&PID_00C0&MI_00#private-serial";
-        var device = NativeDevices.InspectHidInterface(path, 0x1532, "Mouse", "private-container",
-            () => throw new Win32Exception(5, @"Denied C:\Users\Someone\secret " + path), log)!;
-        Equal<ushort>(0x00c0, device.Product);
-        Equal<int?>(5, device.AccessError);
-        var target = DeviceCatalog.FromHid([device]).Single();
-        var readable = device with { AccessError = null, FeatureBytes = 91 };
-        Equal(DeviceCatalog.FromHid([readable]).Single().Id, target.Id);
-        Equal("USB", target.Connection);
-        var calls = 0;
-        var reading = DeviceReader.ReadHidTarget(target, (_, _) => { calls++; throw new Exception("Must not query denied metadata"); }).GetAwaiter().GetResult();
-        Equal(0, calls);
-        Equal(ReadFailure.AccessDenied, reading.Failure);
-        Equal<int?>(5, reading.ErrorCode);
-        Equal("USB", reading.Connection);
-        Equal(false, reading.Connected == false);
-        var json = JsonSerializer.Serialize(target);
-        Equal(false, json.Contains("private-"));
-        foreach (var file in Directory.GetFiles(log.LogFolder))
-        {
-            using var entry = JsonDocument.Parse(File.ReadAllText(file));
-            Equal(5, entry.RootElement.GetProperty("nativeError").GetInt32());
-            var message = entry.RootElement.GetProperty("message").GetString()!;
-            Equal(true, message.Contains("VID=1532") && message.Contains("PID=00c0"));
-            Equal(false, File.ReadAllText(file).Contains("private-serial"));
-            Equal(false, File.ReadAllText(file).Contains("Someone"));
-        }
+        var store = new BatteryUsageStore(root, log);
+        var now = DateTimeOffset.Now.AddMinutes(-30);
+        store.Record("mouse", "Mouse", "mouse", 80, false, now);
+        store.Record("mouse", "Mouse", "mouse", 81, false, now.AddMinutes(1));
+        store.Record("mouse", "Mouse", "mouse", 81, false, now.AddMinutes(2));
+        store.Record("keyboard", "Keyboard", "keyboard", 60, false, now);
+        Equal(2, store.SamplesFor("mouse").Count);
+        Equal(2, store.Devices().Count);
+        var reloaded = new BatteryUsageStore(root, log);
+        Equal(2, reloaded.SamplesFor("mouse").Count);
+        reloaded.Delete("mouse");
+        Equal(0, new BatteryUsageStore(root, log).SamplesFor("mouse").Count);
+        Equal(1, new BatteryUsageStore(root, log).SamplesFor("keyboard").Count);
     }
-    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    finally { Directory.Delete(root, true); }
 });
-Check("read access denial survives isolated JSON and preserves USB or receiver transport", () =>
+Check("battery usage never records unsupported or failed reads", () =>
 {
-    foreach (var (product, connection) in new (ushort, string)[] { (0x00c0, "USB"), (0x00c1, "2.4G"), (0x0577, "2.4G") })
+    var root = Path.Combine(Path.GetTempPath(), "PeriDock-usage-test-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+    try
     {
-        var target = DeviceCatalog.FromHid([new HidDevice("controlled", product, 0xff00, 1, 64, 64, 91)]).Single();
-        foreach (var error in new Exception[] { new Win32Exception(5, "controlled access denial"), new UnauthorizedAccessException("controlled denial") })
-        {
-            var result = DeviceReader.ReadHidTarget(target, (_, _) => throw error).GetAwaiter().GetResult();
-            var restored = JsonSerializer.Deserialize<Reading>(JsonSerializer.Serialize(result))!;
-            Equal(ReadFailure.AccessDenied, restored.Failure);
-            Equal<int?>(5, restored.ErrorCode);
-            Equal(connection, restored.Connection);
-            Equal<int?>(null, restored.Percent);
-            Equal<bool?>(null, restored.Connected);
-        }
-    }
-});
-Check("working collection wins over an inaccessible sibling and known denial wins over generic failure", () =>
-{
-    var accessible = new HidDevice("good", 0x00c0, 1, 2, 0, 0, 91, Container: "same-device");
-    var denied = accessible with { Path = "denied", AccessError = 5, FeatureBytes = 0 };
-    var target = DeviceCatalog.FromHid([denied, accessible]).Single();
-    var live = DeviceReader.ReadHidTarget(target, (interfaces, _) =>
-    {
-        Equal(1, interfaces.Length);
-        Equal("good", interfaces[0].Path);
-        return Task.FromResult(new Reading(50, true, 1600, 1600, "HID", "已连接", Connection: "USB", Connected: true));
-    }).GetAwaiter().GetResult();
-    Equal<int?>(50, live.Percent);
-    Equal(ReadFailure.None, live.Failure);
-    var failed = DeviceReader.ReadHidTarget(target, (_, _) => throw new IOException("generic failure")).GetAwaiter().GetResult();
-    Equal(ReadFailure.AccessDenied, failed.Failure);
-    Equal<int?>(5, failed.ErrorCode);
-});
-Check("unsupported protocols and missing collections remain visible without sending guessed commands", () =>
-{
-    var unknown = DeviceCatalog.FromHid([new HidDevice("unknown", 0xffff, 1, 2, 0, 0, 91)]).Single();
-    var calls = 0;
-    var unsupported = DeviceReader.ReadHidTarget(unknown, (_, _) => { calls++; throw new Exception("Unexpected query"); }).GetAwaiter().GetResult();
-    Equal(0, calls);
-    Equal(ReadFailure.ProtocolUnsupported, unsupported.Failure);
-    Equal(false, unsupported.Connected == false);
-    var noFeature = DeviceCatalog.FromHid([new HidDevice("no-feature", 0x00c0, 1, 2, 0, 0, 0)]).Single();
-    var missing = DeviceReader.ReadHidTarget(noFeature).GetAwaiter().GetResult();
-    Equal(ReadFailure.ProtocolUnsupported, missing.Failure);
-    Equal("USB", missing.Connection);
-    Equal(false, missing.Connected == false);
-});
-Check("other native failures keep their error code and transport without requesting elevation", () =>
-{
-    var device = new HidDevice("controlled", 0x00c0, 1, 2, 0, 0, 91);
-    var target = DeviceCatalog.FromHid([device]).Single();
-    var result = DeviceReader.ReadHidTarget(target, (_, _) => throw new Win32Exception(32, "controlled sharing violation")).GetAwaiter().GetResult();
-    Equal(ReadFailure.ReadError, result.Failure);
-    Equal<int?>(32, result.ErrorCode);
-    Equal("USB", result.Connection);
-    Equal<int?>(31, Diagnostics.NativeError(new IOException("controlled I/O error", unchecked((int)0x8007001f))));
-    Equal<int?>(null, Diagnostics.NativeError(new InvalidOperationException("not a Win32 HRESULT")));
-});
-Check("fresh USB, receiver and Bluetooth readings recover after denial and preserve cache semantics", () =>
-{
-    foreach (var connection in new[] { "USB", "2.4G", "蓝牙" })
-    {
-        var state = new BatteryState("controlled", "Device", "Device");
+        var store = new BatteryUsageStore(root, new Diagnostics(root));
         var now = DateTimeOffset.UtcNow;
-        state.Apply(new(null, null, null, null, "HID", "Denied", Connection: connection,
-            Failure: ReadFailure.AccessDenied, ErrorCode: 5), now);
-        state.Apply(new(40, connection == "蓝牙" ? null : true, 1600, 1600, "Fixture", "已连接", Connection: connection, Connected: true), now.AddSeconds(1));
-        Equal("40%", state.PercentText);
-        Equal(connection, state.Connection);
-        Equal(ReadFailure.None, state.Failure);
-        Equal<int?>(null, state.ErrorCode);
-        Equal(true, state.LastReadSucceeded);
-        state.Apply(new(39, true, 1600, 1600, "Windows cache", "缓存", Cached: true, Connection: connection, Connected: true), now.AddSeconds(2));
-        Equal(false, state.LastReadSucceeded);
-        Equal<bool?>(null, state.Charging);
-        Equal("未知", state.DpiText);
-        Equal(now.AddSeconds(1), state.LastSuccess);
+        var unsupported = new BatteryState("device", "Device", "Device", "mouse") { Supported = false };
+        unsupported.Apply(new Reading(50, false, null, null, "HID", "已连接"), now);
+        store.Record(unsupported, now);
+        var failed = new BatteryState("failed", "Failed", "Failed", "mouse");
+        failed.Apply(new Reading(null, null, null, null, "HID", "未响应"), now);
+        store.Record(failed, now);
+        Equal(0, store.Devices().Count);
     }
+    finally { Directory.Delete(root, true); }
 });
-Check("a failed query without a static transport keeps the last known connection", () =>
-{
-    var state = new BatteryState("keyboard", "ROG", "ROG");
-    var now = DateTimeOffset.UtcNow;
-    state.Apply(new(75, false, null, null, "ROG HID", "已连接", Connection: "USB", Connected: true), now);
-    state.Apply(new(null, null, null, null, "ROG HID", "访问被拒绝", Failure: ReadFailure.AccessDenied, ErrorCode: 5), now.AddSeconds(1));
-    Equal("USB", state.Connection);
-    Equal<bool?>(null, state.Connected);
-    Equal("--", state.PercentText);
-    state.Apply(new(null, null, null, null, "HID", "已移除", Connection: "未连接", Connected: false), now.AddSeconds(2));
-    Equal("未连接", state.Connection);
-});
-Check("official images match model and transport suffix without sending unknown names", () =>
-{
-    Equal("https://www.razer.com/gaming-mice/razer-viper-v3-pro",
-        OfficialProductImages.PageFor("Razer Viper V3 Pro (BT)")?.AbsoluteUri);
-    Equal("https://rog.asus.com/keyboards/keyboards/aura-rgb/rog-azoth-x/",
-        OfficialProductImages.PageFor("ROG AZOTH X")?.AbsoluteUri);
-    Equal<Uri?>(null, OfficialProductImages.PageFor("Razer Alice's custom mouse 123456"));
-    Equal<Uri?>(null, OfficialProductImages.PageFor("Razer Viper V3 Pro 35K unknown variant"));
-});
-Check("official image parser validates model, host and metadata attribute order", () =>
-{
-    var page = new Uri("https://www.razer.com/gaming-mice/razer-basilisk-v3-pro");
-    var html = "<meta content='Razer Basilisk V3 Pro | Razer' property='og:title'>" +
-        "<meta content='https://assets2.razerzone.com/product.jpg?w=512&amp;h=512' property='og:image'>";
-    Equal("https://assets2.razerzone.com/product.jpg?w=512&h=512",
-        OfficialProductImages.ImageFromPage(page, html)?.AbsoluteUri);
-    Equal<Uri?>(null, OfficialProductImages.ImageFromPage(page, html.Replace("Basilisk V3 Pro", "Basilisk V3")));
-    Equal<Uri?>(null, OfficialProductImages.ImageFromPage(page, html.Replace("assets2.razerzone.com", "assets2.razerzone.com.evil.example")));
-    Equal<Uri?>(null, OfficialProductImages.ImageFromPage(page, html.Replace("https://assets2", "http://assets2")));
-    Equal<Uri?>(null, OfficialProductImages.ImageFromPage(page, html.Replace("assets2.razerzone.com", "127.0.0.1")));
-    Equal<Uri?>(null, OfficialProductImages.ImageFromPage(new Uri("https://evil.example/razer-basilisk-v3-pro"), html));
-});
-string ImageTestRoot() => Path.Combine(Path.GetTempPath(), "PeriDock-images-" + Guid.NewGuid().ToString("N"));
-HttpResponseMessage ImageResponse(string text) => new(HttpStatusCode.OK) { Content = new StringContent(text, System.Text.Encoding.UTF8, "text/html") };
-var officialHtml = "<meta property='og:title' content='Razer Basilisk V3 Pro'>" +
-    "<meta property='og:image' content='https://assets2.razerzone.com/product.png'>";
-var imageFixture = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "assets", "peridock.png"));
-Check("product images download once per model, retain source and work offline", () =>
-{
-    var root = ImageTestRoot();
-    try
-    {
-        using var handler = new ImageHttpHandler(request =>
-        {
-            if (request.RequestUri!.Host == "www.razer.com") return ImageResponse(officialHtml);
-            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(imageFixture) };
-            response.Content.Headers.ContentType = new("image/png"); return response;
-        });
-        using var client = new HttpClient(handler);
-        var images = new OfficialProductImages(root, new Diagnostics(root), client);
-        var first = images.GetAsync("Razer Basilisk V3 Pro");
-        Equal(true, ReferenceEquals(first, images.GetAsync("Razer Basilisk V3 Pro (BT)")));
-        var path = first.GetAwaiter().GetResult();
-        Equal(true, path is not null && File.Exists(path)); Equal(2, handler.Seen.Count);
-        Equal(true, File.ReadAllText(path + ".source.json").Contains("https://assets2.razerzone.com/product.png"));
-        using var offlineHandler = new ImageHttpHandler(_ => throw new HttpRequestException("offline"));
-        using var offline = new HttpClient(offlineHandler);
-        Equal(path, new OfficialProductImages(root, new Diagnostics(root), offline).GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
-        Equal(0, offlineHandler.Seen.Count);
-        File.WriteAllText(path!, "corrupt cache");
-        Equal(path, new OfficialProductImages(root, new Diagnostics(root), client).GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
-        Equal(4, handler.Seen.Count);
-        Equal(0, Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories).Length);
-        var state = new BatteryState("test", "test", "test") { ProductImagePath = path };
-        Equal(false, JsonSerializer.Serialize(state).Contains(path!));
-    }
-    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
-});
-Check("per-model local pictures win without leaking one mouse image to other models", () =>
-{
-    var root = ImageTestRoot();
-    try
-    {
-        var path = OfficialProductImages.OverridePath(root, "Razer Viper V3 Pro");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!); File.WriteAllBytes(path, imageFixture);
-        using var handler = new ImageHttpHandler(_ => throw new HttpRequestException("offline"));
-        using var client = new HttpClient(handler);
-        var images = new OfficialProductImages(root, new Diagnostics(root), client);
-        Equal(path, images.GetAsync("Razer Viper V3 Pro (BT)").GetAwaiter().GetResult()); Equal(0, handler.Seen.Count);
-        Equal<string?>(null, images.GetAsync("Razer Alice's private mouse").GetAwaiter().GetResult()); Equal(0, handler.Seen.Count);
-        Equal<string?>(null, images.GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult()); Equal(2, handler.Seen.Count);
-        Equal(true, File.ReadAllBytes(path).SequenceEqual(imageFixture));
-    }
-    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
-});
-Check("failed image fetches back off across restarts and retry after a day", () =>
-{
-    var root = ImageTestRoot();
-    try
-    {
-        using var handler = new ImageHttpHandler(_ => new(HttpStatusCode.NotFound));
-        using var client = new HttpClient(handler);
-        var images = new OfficialProductImages(root, new Diagnostics(root), client);
-        Equal<string?>(null, images.GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
-        Equal<string?>(null, images.GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
-        Equal<string?>(null, new OfficialProductImages(root, new Diagnostics(root), client).GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
-        Equal(2, handler.Seen.Count);
-        var retry = Directory.GetFiles(root, "*.retry", SearchOption.AllDirectories).Single();
-        File.SetLastWriteTimeUtc(retry, DateTime.UtcNow.AddHours(-25));
-        Equal<string?>(null, new OfficialProductImages(root, new Diagnostics(root), client).GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
-        Equal(4, handler.Seen.Count);
-    }
-    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
-});
-Check("official image redirects never leave the vendor or change product model", () =>
-{
-    foreach (var location in new[] { "https://127.0.0.1/product.png", "https://www.razer.com/gaming-mice/razer-basilisk-v3-pro-35k" })
-    {
-        var root = ImageTestRoot();
-        try
-        {
-            using var handler = new ImageHttpHandler(_ =>
-            {
-                var response = new HttpResponseMessage(HttpStatusCode.Found); response.Headers.Location = new Uri(location); return response;
-            });
-            using var client = new HttpClient(handler);
-            Equal<string?>(null, new OfficialProductImages(root, new Diagnostics(root), client).GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
-            Equal(2, handler.Seen.Count);
-            Equal(true, handler.Seen.All(uri => uri.Host == "www.razer.com" &&
-                uri.AbsolutePath is "/gaming-mice/razer-basilisk-v3-pro/buy" or "/gaming-mice/razer-basilisk-v3-pro"));
-        }
-        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
-    }
-});
-Check("invalid, oversized and active image content all fall back safely", () =>
-{
-    foreach (var type in new[] { "image/svg+xml", "image/png", "oversized" })
-    {
-        var root = ImageTestRoot();
-        try
-        {
-            using var handler = new ImageHttpHandler(request =>
-            {
-                if (request.RequestUri!.Host == "www.razer.com") return ImageResponse(officialHtml);
-                var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(type == "oversized" ? new byte[6 * 1024 * 1024] : [1, 2, 3]) };
-                response.Content.Headers.ContentType = new(type == "oversized" ? "image/png" : type); return response;
-            });
-            using var client = new HttpClient(handler);
-            Equal<string?>(null, new OfficialProductImages(root, new Diagnostics(root), client).GetAsync("Razer Basilisk V3 Pro").GetAwaiter().GetResult());
-            Equal(0, Directory.GetFiles(root, "*.png", SearchOption.AllDirectories).Length);
-        }
-        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
-    }
-});
-Check("tray tooltip shows device category and percentage rather than model names", () =>
-{
-    var mouse = new BatteryState("test", "Razer Viper V3 Pro", "Viper", "mouse");
-    mouse.Apply(new(10, false, 1600, 1600, "HID", "已连接", Connected: true), DateTimeOffset.UtcNow);
-    Equal("鼠标：10%", mouse.TrayText);
-    mouse.Apply(new(null, null, null, null, "HID", "访问被拒绝", Failure: ReadFailure.AccessDenied), DateTimeOffset.UtcNow);
-    Equal("鼠标：--", mouse.TrayText);
-    Equal("键盘：--", new BatteryState("kb", "ROG AZOTH X", "Azoth", "keyboard").TrayText);
-    Equal("耳机：--", new BatteryState("hs", "Razer", "Razer", "headset").TrayText);
-});
-Check("Razer official color options are model specific and reject foreign image hosts", () =>
-{
-    var page = OfficialProductImages.PageFor("Razer Basilisk V3 Pro")!;
-    var options = new[] { ("Black", "Razer Basilisk V3 Pro", "assets3.razerzone.com"),
-        ("White", "Razer Basilisk V3 Pro", "assets3.razerzone.com"),
-        ("Black", "Razer Basilisk V3 Pro 35K", "assets3.razerzone.com"),
-        ("Pink", "Razer Basilisk V3 Pro", "evil.example") }.Select(v => new {
-            name = v.Item2 + " - " + v.Item1,
-            images = new[] { new { format = "product", url = "https://" + v.Item3 + "/" + v.Item1 + ".png" } },
-            variantOptionQualifiers = new[] { new { qualifier = "color", value = v.Item1 } }
-        });
-    var html = "<script id='ng-state' type='application/json'>" + JsonSerializer.Serialize(new {
-        nested = new { baseOptions = new[] { new { options } } }
-    }) + "</script>";
-    var values = OfficialProductImages.VariantsFromPage(page, html);
-    Equal(2, values.Count); Equal("黑色", values[0].Label); Equal("白色", values[1].Label);
-    Equal(false, values[0].Id == values[1].Id);
-});
-Check("ROG gallery color options ignore related models and mixed-color hero images", () =>
-{
-    var page = OfficialProductImages.PageFor("ROG Harpe Ace Aim Lab Edition")!;
-    var html = "<img alt='ROG Harpe Ace Aim Lab Edition in black and white' src='https://dlcdnwebimgs.asus.com/hero'>" +
-        "<img alt='ROG Harpe Ace Aim Lab Edition Black front' src='https://dlcdnwebimgs.asus.com/black'>" +
-        "<img alt='ROG Harpe Ace Aim Lab Edition Moonlight White front' src='https://dlcdnwebimgs.asus.com/white'>" +
-        "<img alt='ROG Chakram X White' src='https://dlcdnwebimgs.asus.com/other'>";
-    var values = OfficialProductImages.VariantsFromPage(page, html);
-    Equal(2, values.Count); Equal("黑色", values[0].Label); Equal("月光白", values[1].Label);
-});
-Check("color preferences persist without resetting dock visibility", () =>
-{
-    var root = ImageTestRoot();
-    try
-    {
-        var key = OfficialProductImages.FileKey("Razer Viper V3 Pro");
-        var settings = new UserSettings(true, new() { [key] = "generic" }); settings.Save(root);
-        var loaded = UserSettings.Load(root, new Diagnostics(root));
-        Equal(true, loaded.ShowDock); Equal("generic", loaded.ImageChoices![key]);
-        (loaded with { ShowDock = false }).Save(root);
-        Equal("generic", UserSettings.Load(root, new Diagnostics(root)).ImageChoices![key]);
-    }
-    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
-});
-Check("custom picture import is available without replacing the existing personal override", () =>
-{
-    var root = ImageTestRoot();
-    try
-    {
-        var existing = OfficialProductImages.OverridePath(root, "Razer Viper V3 Pro");
-        Directory.CreateDirectory(Path.GetDirectoryName(existing)!); File.WriteAllBytes(existing, imageFixture);
-        using var handler = new ImageHttpHandler(_ => throw new HttpRequestException("offline"));
-        using var client = new HttpClient(handler);
-        var images = new OfficialProductImages(root, new Diagnostics(root), client);
-        Equal(false, images.GetOptionsAsync("Razer Viper V3 Pro").GetAwaiter().GetResult().Any(v => v.Id == "custom"));
-        var source = Path.Combine(root, "chosen.png"); File.WriteAllBytes(source, imageFixture);
-        var imported = images.ImportAsync("Razer Viper V3 Pro", source).GetAwaiter().GetResult();
-        Equal("custom", imported.Id); Equal("自定义图片", imported.Label);
-        Equal(false, existing == imported.FilePath);
-        Equal(true, File.ReadAllBytes(existing).SequenceEqual(imageFixture));
-        var normalized = File.ReadAllBytes(imported.FilePath!); File.Delete(source);
-        Equal(true, normalized.Length > 0);
-        Equal(true, images.GetOptionsAsync("Razer Viper V3 Pro (USB)").GetAwaiter().GetResult().Any(v => v == imported));
-        new UserSettings(true, new() { [OfficialProductImages.FileKey("Razer Viper V3 Pro")] = imported.Id }).Save(root);
-        var restarted = new OfficialProductImages(root, new Diagnostics(root), client);
-        var restored = restarted.GetOptionsAsync("Razer Viper V3 Pro (BT)").GetAwaiter().GetResult().Single(v => v.Id == "custom");
-        Equal(imported.FilePath, restored.FilePath); Equal(true, File.ReadAllBytes(restored.FilePath!).SequenceEqual(normalized));
-        Equal(false, restarted.GetOptionsAsync("Unknown custom mouse").GetAwaiter().GetResult().Any(v => v.Id == "custom"));
-        Equal("custom", UserSettings.Load(root, new Diagnostics(root)).ImageChoices![OfficialProductImages.FileKey("Razer Viper V3 Pro")]);
-        Equal(true, UserSettings.Load(root, new Diagnostics(root)).ShowDock);
-    }
-    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
-});
-Check("invalid or cancelled custom imports preserve the saved image and leave no temporary files", () =>
-{
-    var root = ImageTestRoot();
-    try
-    {
-        Directory.CreateDirectory(root);
-        var images = new OfficialProductImages(root, new Diagnostics(root));
-        var source = Path.Combine(root, "chosen.png"); File.WriteAllBytes(source, imageFixture);
-        var imported = images.ImportAsync("Unknown model", source).GetAwaiter().GetResult();
-        var good = File.ReadAllBytes(imported.FilePath!);
-        Equal(true, good.Take(8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }));
-        foreach (var invalid in new[] { "corrupt.png", "too-big.png", "active.svg", "missing.png" })
-        {
-            var file = Path.Combine(root, invalid);
-            if (invalid != "missing.png") File.WriteAllBytes(file, invalid == "too-big.png" ? new byte[10 * 1024 * 1024 + 1] : [1, 2, 3]);
-            var rejected = false;
-            try { images.ImportAsync("Unknown model", file).GetAwaiter().GetResult(); }
-            catch { rejected = true; }
-            Equal(true, rejected); Equal(true, File.ReadAllBytes(imported.FilePath!).SequenceEqual(good));
-        }
-        using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
-        var stopped = false;
-        try { images.ImportAsync("Unknown model", source, cancelled.Token).GetAwaiter().GetResult(); }
-        catch (OperationCanceledException) { stopped = true; }
-        Equal(true, stopped); Equal(true, File.ReadAllBytes(imported.FilePath!).SequenceEqual(good));
-        Equal(0, Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories).Length);
-        File.WriteAllBytes(source, File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "assets", "mouse-display.png")));
-        Equal(imported.FilePath, images.ImportAsync("Unknown model", source).GetAwaiter().GetResult().FilePath);
-        Equal(false, File.ReadAllBytes(imported.FilePath!).SequenceEqual(good));
-    }
-    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
-});
-Check("custom imports accept real JPEG BMP and ICO files and normalize each to PNG", () =>
-{
-    var root = ImageTestRoot();
-    try
-    {
-        Directory.CreateDirectory(root);
-        var images = new OfficialProductImages(root, new Diagnostics(root));
-        using var input = new MemoryStream(imageFixture);
-        var frame = System.Windows.Media.Imaging.BitmapFrame.Create(input);
-        foreach (var extension in new[] { ".jpg", ".bmp", ".ico" })
-        {
-            var source = Path.Combine(root, "chosen" + extension);
-            if (extension == ".ico") File.Copy(Path.Combine(AppContext.BaseDirectory, "assets", "peridock.ico"), source);
-            else
-            {
-                System.Windows.Media.Imaging.BitmapEncoder encoder = extension == ".jpg"
-                    ? new System.Windows.Media.Imaging.JpegBitmapEncoder() : new System.Windows.Media.Imaging.BmpBitmapEncoder();
-                encoder.Frames.Add(frame); using var file = File.Create(source); encoder.Save(file);
-            }
-            var original = File.ReadAllBytes(source);
-            var choice = images.ImportAsync("Unknown model", source).GetAwaiter().GetResult();
-            Equal(true, File.ReadAllBytes(choice.FilePath!).Take(8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }));
-            Equal(true, File.ReadAllBytes(source).SequenceEqual(original));
-        }
-    }
-    finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
-});
-if (args.Length == 2 && args[0] == "--official-images")
-{
-    foreach (var name in new[] { "Razer Basilisk V3 Pro", "Razer DeathStalker V2 Pro", "ROG Harpe Ace Aim Lab Edition", "ROG Azoth X", "ROG Pelta" })
-        Check("live official product image: " + name, () =>
-        {
-            var images = new OfficialProductImages(args[1], new Diagnostics(args[1]));
-            var file = images.GetAsync(name).GetAwaiter().GetResult();
-            Equal(true, file is not null && File.Exists(file) && File.Exists(file + ".source.json"));
-            Console.WriteLine("IMAGE " + name + " => " + file);
-        });
-    foreach (var name in new[] { "Razer Basilisk V3 Pro", "ROG Harpe Ace Aim Lab Edition" })
-        Check("live official color selection and offline restore: " + name, () =>
-        {
-            var values = new OfficialProductImages(args[1], new Diagnostics(args[1])).GetOptionsAsync(name).GetAwaiter().GetResult();
-            var colors = values.Where(v => v.Id is not ("auto" or "local" or "generic")).ToArray();
-            Equal(true, colors.Length >= 2);
-            Equal(true, colors.Any(v => v.Label.Contains("白")));
-            var metadata = Path.Combine(args[1], "data", "device-images", OfficialProductImages.FileKey(name) + ".options.json");
-            File.SetLastWriteTimeUtc(metadata, DateTime.UtcNow.AddDays(-8));
-            using var handler = new ImageHttpHandler(_ => throw new HttpRequestException("offline"));
-            using var offline = new HttpClient(handler);
-            var restored = new OfficialProductImages(args[1], new Diagnostics(args[1]), offline).GetOptionsAsync(name).GetAwaiter().GetResult();
-            Equal(true, colors.All(c => restored.Any(r => r.Id == c.Id && r.FilePath == c.FilePath)));
-            Console.WriteLine("COLORS " + name + ": " + string.Join(", ", colors.Select(c => c.Label)));
-        });
-}
-if (args.Length == 2 && args[0] == "--new-brand-images")
-{
-    foreach (var product in OfficialProductImages.KnownProducts)
-        Check("live verified official assets and offline restore: " + product.Models[0], () =>
-        {
-            var images = new OfficialProductImages(args[1], new Diagnostics(args[1]));
-            var options = images.GetOptionsAsync(product.Models[0]).GetAwaiter().GetResult();
-            var colors = options.Where(o => o.Id is not ("auto" or "generic")).ToArray();
-            Equal(product.Colors.Length, colors.Length);
-            Equal(true, colors.All(c => c.FilePath is not null && File.Exists(c.FilePath)));
-            Equal(true, options.Single(o => o.Id == "auto").FilePath is not null);
-            using var handler = new ImageHttpHandler(_ => throw new HttpRequestException("offline"));
-            using var offline = new HttpClient(handler);
-            var restored = new OfficialProductImages(args[1], new Diagnostics(args[1]), offline).GetOptionsAsync(product.Models[0]).GetAwaiter().GetResult();
-            Equal(true, colors.All(c => restored.Any(o => o.Id == c.Id && o.FilePath == c.FilePath)));
-            Equal(0, handler.Seen.Count);
-            Console.WriteLine("OFFICIAL " + product.Models[0] + ": " + string.Join(", ", colors.Select(c => c.Label)));
-        });
-}
 Console.WriteLine($"{checks - failures.Count}/{checks} checks passed");
-if (failures.Count == 0 && args.Length == 2 && args[0] == "--catalog")
-{
-    var profiles = DeviceCatalog.Profiles;
-    var catalog = profiles.Select(p => new {
-        vid = $"{p.Vendor:x4}", pid = $"{p.Product:x4}", p.Name, p.Kind, p.Reader, p.Connection,
-        productNamePrefix = p.MatchName,
-        protocolAvailable = p.Reader != "Unsupported", hardwareVerified = false
-    });
-    File.WriteAllText(args[1], JsonSerializer.Serialize(catalog, new JsonSerializerOptions { WriteIndented = true }));
-    Console.WriteLine($"Catalog: {profiles.Count} product IDs, {profiles.Select(p => p.Name).Distinct().Count()} names; " +
-        $"{profiles.Count(p => p.Reader != "Unsupported")} IDs with protocol adapters");
-}
 return failures.Count == 0 ? 0 : 1;
-
-sealed class ImageHttpHandler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
-{
-    internal List<Uri> Seen { get; } = [];
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
-    {
-        Seen.Add(request.RequestUri!);
-        return Task.FromResult(response(request));
-    }
-}

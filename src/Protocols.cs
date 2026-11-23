@@ -130,8 +130,8 @@ internal static class Protocols
     internal static byte[] MouseRequest(byte commandClass, byte command, byte size, byte transaction = 0x1f)
     {
         if (!((commandClass == 7 && command is 0x80 or 0x84 && size == 2) ||
-              (commandClass == 4 && command == 0x85 && size == 7)))
-            throw new ArgumentException("Only battery, charging and DPI read queries are allowed");
+              (commandClass == 4 && command is 0x05 or 0x85 && size == 7)))
+            throw new ArgumentException("Only battery, charging, DPI read and DPI write queries are allowed");
         if (transaction is not (0x1f or 0x3f or 0x9f or 0xff)) throw new ArgumentException("Unsupported transaction id");
         var packet = new byte[91];
         packet[2] = transaction; packet[6] = size; packet[7] = commandClass; packet[8] = command;
@@ -156,6 +156,19 @@ internal static class Protocols
         var y = (packet[12] << 8) | packet[13];
         return x is >= 50 and <= 35000 && y is >= 50 and <= 35000 ? (x, y) : null;
     }
+    internal static byte[] MouseDpiSetRequest(int x, int y, byte transaction = 0x1f)
+    {
+        if (x is < 50 or > 35000 || y is < 50 or > 35000)
+            throw new ArgumentOutOfRangeException(nameof(x), "DPI must be between 50 and 35000");
+        var packet = MouseRequest(4, 0x05, 7, transaction);
+        packet[10] = (byte)(x >> 8); packet[11] = (byte)x;
+        packet[12] = (byte)(y >> 8); packet[13] = (byte)y;
+        packet[89] = 0;
+        for (var i = 3; i <= 88; i++) packet[89] ^= packet[i];
+        return packet;
+    }
+    internal static bool MouseDpiSetMatches(byte[] packet, byte transaction = 0x1f)
+        => MouseMatches(packet, 4, 0x05, transaction);
     internal static byte[] HeadsetRequest(byte command, byte route)
     {
         if (!((command == 0x20 && route == 0) || (command is 0x21 or 0x2a && route == 0x80)))
@@ -165,6 +178,43 @@ internal static class Protocols
         packet[9] = route; packet[10] = command;
         for (var i = 0; i < 62; i++) packet[62] ^= packet[i];
         return packet;
+    }
+    static byte[] HeadsetFrame(byte[] command, byte[]? data, byte route = 0x80)
+    {
+        var packet = new byte[64];
+        packet[0] = 2; packet[2] = 0x60;
+        packet[6] = (byte)(command.Length + (data?.Length ?? 0) + 1);
+        packet[9] = route;
+        Array.Copy(command, 0, packet, 10, command.Length);
+        if (data is not null) Array.Copy(data, 0, packet, 10 + command.Length, data.Length);
+        for (var i = 0; i < 62; i++) packet[62] ^= packet[i];
+        return packet;
+    }
+    internal static byte[] HeadsetAncRequest() => HeadsetFrame([0x12, 0, 0], null);
+    internal static byte[] HeadsetAncSetRequest(int status, int level)
+    {
+        if (status is not (0 or 1 or 80) || level is < 1 or > 4)
+            throw new ArgumentOutOfRangeException(nameof(status), "Invalid ANC mode or level");
+        return HeadsetFrame([0x92, 0, 2], [(byte)status, (byte)level]);
+    }
+    internal static (int Status, int Level)? HeadsetAnc(byte[] packet)
+    {
+        if (packet.Length != 64 || packet[0] != 2 || packet[1] != 2 || packet[2] != 0x60 ||
+            packet[9] != 0x80 || packet[10] != 0x12 || packet[11] != 1 || packet[12] != 2) return null;
+        byte sum = 0;
+        for (var i = 0; i < 62; i++) sum ^= packet[i];
+        if (sum != packet[62]) return null;
+        var status = packet[13];
+        var level = packet[14];
+        return status is 0 or 1 or 80 && level is >= 1 and <= 4 ? (status, level) : null;
+    }
+    internal static bool HeadsetAncSetSucceeded(byte[] packet)
+    {
+        if (packet.Length != 64 || packet[0] != 2 || packet[1] != 2 || packet[2] != 0x60 ||
+            packet[9] != 0x80 || packet[10] != 0x92 || packet[11] != 1 || packet[12] != 1) return false;
+        byte sum = 0;
+        for (var i = 0; i < 62; i++) sum ^= packet[i];
+        return sum == packet[62];
     }
     internal static int? HeadsetValue(byte[] packet, byte command, byte route)
     {

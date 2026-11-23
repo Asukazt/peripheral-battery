@@ -10,7 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\PeriDock.csproj"/>
-    <Content Include="status.sample.json" CopyToOutputDirectory="PreserveNewest"/>
     <Content Include="..\..\assets\**\*.png;..\..\assets\**\*.ico;..\..\assets\**\*.svg">
       <Link>assets\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
