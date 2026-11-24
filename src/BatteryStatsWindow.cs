@@ -98,6 +98,7 @@ internal sealed class BatteryStatsWindow : Window
         ranges.Children.Add(range24); ranges.Children.Add(range7); ranges.Children.Add(range30);
         DockPanel.SetDock(ranges, Dock.Left); rangeRow.Children.Add(ranges);
         chargeInfo = Text("", 12, Muted);
+        chargeInfo.ToolTip = "等效循环按区间内电量下降累计，充电不清零；采样中断时按前后读数与间隔估算。";
         chargeInfo.VerticalAlignment = VerticalAlignment.Center;
         chargeInfo.Margin = new Thickness(14, 0, 0, 0);
         DockPanel.SetDock(chargeInfo, Dock.Left); rangeRow.Children.Add(chargeInfo);
@@ -136,7 +137,7 @@ internal sealed class BatteryStatsWindow : Window
         Grid.SetRow(recent, 4); right.Children.Add(recent);
 
         var bottom = new DockPanel { LastChildFill = false, VerticalAlignment = VerticalAlignment.Center };
-        footer = Text("仅统计连接且持续放电的时间；休眠、断开和充电期间不计入。", 11, Muted);
+        footer = Text("仅统计连接且持续放电；充电、休眠、断开不计时，循环按累计放电量计（含间隔）。", 11, Muted);
         footer.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(footer, Dock.Left); bottom.Children.Add(footer);
         clear = new Button
@@ -190,7 +191,10 @@ internal sealed class BatteryStatsWindow : Window
         deviceSubtitle.Text = selected is null ? "未发现已适配外设" :
             $"{KindName(selected.Kind)} · {(selected.Percent.HasValue ? "当前 " + selected.Percent + "%" : "当前电量未知")}" +
             (selected.Current ? "" : " · 设备当前未连接");
-        chargeInfo.Text = $"充电 {summary.ChargeCount} 次 · 上次充电 {Ago(summary.LastChargeEnd)}";
+        chargeInfo.Text = $"充电 {summary.ChargeCount} 次 · 上次充电 {Ago(summary.LastChargeEnd)}" + Environment.NewLine +
+            (summary.FullCycleTime is { } cycle
+                ? $"区间等效循环 {summary.EquivalentCycles:0.###} 次 · 每累计耗电 100% {BatteryUsage.Remaining(cycle)}"
+                : $"区间等效循环 {summary.EquivalentCycles:0.###} 次 · 每累计耗电 100% 样本不足");
 
         todayValue.Text = summary.SampleCount == 0 ? "暂无数据" : BatteryUsage.Duration(summary.TodayDischarge);
         todaySub.Text = summary.SampleCount == 0 ? "等待首次记录" : $"下降 {summary.TodayDrop:0.#}%";
@@ -202,7 +206,7 @@ internal sealed class BatteryStatsWindow : Window
         rateValue.Text = summary.SampleCount == 0 ? "暂无数据" : BatteryUsage.Rate(summary.DrainPerHour);
         rateSub.Text = summary.SampleCount == 0 ? "等待首次记录" : $"区间下降 {summary.PercentDropped:0.#}%";
         remainingValue.Text = summary.SampleCount == 0 ? "暂无数据" : BatteryUsage.Remaining(summary.EstimatedRemaining);
-        remainingSub.Text = summary.EstimatedRemaining.HasValue ? "按当前耗电速度" : "需要至少 1 小时放电样本";
+        remainingSub.Text = summary.EstimatedRemaining.HasValue ? "按连续放电速度" : "需要至少 1 小时放电样本";
 
         var nextChartKey = selectedId + "|" + range.Ticks + "|" + summary.SampleCount + "|" +
             (samples.LastOrDefault()?.Time.Ticks ?? 0);

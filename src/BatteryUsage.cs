@@ -28,6 +28,8 @@ internal sealed class BatteryUsageSummary
     internal double PercentDropped { get; init; }
     internal double? DrainPerHour { get; init; }
     internal TimeSpan? EstimatedRemaining { get; init; }
+    internal TimeSpan? FullCycleTime { get; init; }
+    internal double EquivalentCycles { get; init; }
     internal TimeSpan TodayDischarge { get; init; }
     internal double TodayDrop { get; init; }
     internal int ChargeCount { get; init; }
@@ -65,6 +67,8 @@ internal static class BatteryUsage
         var sessionStartPercent = 0;
         var sessionEndPercent = 0;
         var sessionDrop = 0d;
+        var cycleDropped = 0d;
+        var cycleSeconds = 0d;
 
         void CloseSession(bool ongoing)
         {
@@ -84,14 +88,21 @@ internal static class BatteryUsage
             if (b.Time >= start && a.Charging != true && b.Charging == true) charges++;
             if (b.Time >= start && a.Charging == true && b.Charging != true) lastChargeEnd = b.Time;
 
-            var breakSession = delta > GapLimit || delta <= TimeSpan.Zero ||
-                a.Charging == true || b.Charging == true || b.Percent > a.Percent;
-            if (breakSession) { CloseSession(false); continue; }
-            if (b.Time <= start) continue;
-
             var from = a.Time < start ? start : a.Time;
             var seconds = (b.Time - from).TotalSeconds;
-            if (seconds <= 0) continue;
+            if (b.Time > start && delta > TimeSpan.Zero && seconds > 0 &&
+                b.Charging != true && b.Percent <= a.Percent &&
+                !(a.Charging == true && delta > GapLimit))
+            {
+                var pairDrop = (a.Percent - b.Percent) * seconds / delta.TotalSeconds;
+                cycleDropped += pairDrop;
+                if (delta <= GapLimit || pairDrop > 0) cycleSeconds += seconds;
+            }
+
+            var breakSession = delta > GapLimit || delta <= TimeSpan.Zero ||
+                b.Charging == true || b.Percent > a.Percent;
+            if (breakSession) { CloseSession(false); continue; }
+            if (b.Time <= start || seconds <= 0) continue;
             var share = seconds / delta.TotalSeconds;
             var drop = (a.Percent - b.Percent) * share;
             intervals.Add((from, b.Time, drop));
@@ -116,6 +127,13 @@ internal static class BatteryUsage
             var hours = currentPercent.Value / rate.Value;
             if (hours is >= 0.2 and <= 500) remaining = TimeSpan.FromHours(hours);
         }
+        var cycleRate = cycleSeconds >= 2700 && cycleDropped >= 3
+            ? cycleDropped / (cycleSeconds / 3600) : (double?)null;
+        TimeSpan? fullCycle = null;
+        if (cycleRate is > 0)
+        {
+            fullCycle = TimeSpan.FromHours(100 / cycleRate.Value);
+        }
 
         var localNow = TimeZoneInfo.ConvertTime(now, tz);
         var localDate = localNow.Date;
@@ -136,6 +154,8 @@ internal static class BatteryUsage
             PercentDropped = dropped,
             DrainPerHour = rate,
             EstimatedRemaining = remaining,
+            FullCycleTime = fullCycle,
+            EquivalentCycles = cycleDropped / 100,
             TodayDischarge = TimeSpan.FromSeconds(todaySeconds),
             TodayDrop = todayDrop,
             ChargeCount = charges,

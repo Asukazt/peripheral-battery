@@ -11,7 +11,7 @@ namespace PeriDock;
 internal static class Program
 {
     internal const string AppName = "Peripheral Battery";
-    internal const string Version = "0.3.0";
+    internal const string Version = "0.3.1";
     [STAThread]
     static int Main(string[] args)
     {

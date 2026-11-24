@@ -391,8 +391,10 @@ Check("battery usage separates discharge from charging and estimates remaining t
     Equal(t0.AddHours(4), summary.LastChargeEnd ?? default);
     Equal(2, summary.Sessions.Count);
     Equal(true, summary.EstimatedRemaining is { TotalHours: > 14 and < 15 });
+    Equal(0.18d, Math.Round(summary.EquivalentCycles, 2));
+    Equal(true, summary.FullCycleTime is { TotalHours: > 16 and < 17 });
 });
-Check("battery usage excludes sleep gaps from discharge time", () =>
+Check("battery usage keeps sleep gaps out of active discharge but uses them for cycles", () =>
 {
     var t0 = new DateTimeOffset(2026, 11, 20, 9, 0, 0, TimeSpan.Zero);
     var samples = new[]
@@ -404,6 +406,27 @@ Check("battery usage excludes sleep gaps from discharge time", () =>
     Equal(TimeSpan.Zero, summary.DischargeTime);
     Equal<double?>(null, summary.DrainPerHour);
     Equal<TimeSpan?>(null, summary.EstimatedRemaining);
+    Equal(true, summary.FullCycleTime is { TotalHours: > 19.99 and < 20.01 });
+    Equal(0.1d, Math.Round(summary.EquivalentCycles, 2));
+});
+Check("battery cycles accumulate discharge across a partial recharge", () =>
+{
+    var t0 = new DateTimeOffset(2026, 11, 20, 9, 0, 0, TimeSpan.Zero);
+    var samples = new List<BatterySample>();
+    void Add(int minutes, int percent, bool? charging) => samples.Add(new BatterySample
+    {
+        Time = t0.AddMinutes(minutes), Id = "mouse", Name = "Mouse", Kind = "mouse",
+        Percent = percent, Charging = charging
+    });
+    for (var minute = 0; minute <= 420; minute += 5) Add(minute, 100 - minute / 6, false);
+    Add(425, 50, true); Add(430, 100, true);
+    for (var minute = 435; minute <= 610; minute += 5) Add(minute, 100 - (minute - 430) / 6, false);
+
+    var summary = BatteryUsage.Compute(samples, t0.AddMinutes(610), TimeSpan.FromHours(24), 70, TimeZoneInfo.Utc);
+    Equal(100d, summary.PercentDropped);
+    Equal(TimeSpan.FromHours(10), summary.DischargeTime);
+    Equal(1d, Math.Round(summary.EquivalentCycles, 3));
+    Equal(true, summary.FullCycleTime is { TotalHours: > 9.99 and < 10.01 });
 });
 Check("battery usage store persists per-device history and skips duplicate samples", () =>
 {
